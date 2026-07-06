@@ -1,0 +1,34 @@
+# Search terms defining the boundary of "Syriac Studies" for OpenAlex queries.
+# Each term is matched against work titles (title.search). Extend this list
+# over time as curation reveals gaps or false positives.
+#
+# exclude_terms: titles containing these are dropped even if a term above matched
+# (used to filter out unrelated medical/technical "Syriac" false positives, if any).
+
+include_terms:
+  - syriac
+  - peshitta
+  - "ephrem the syrian"
+  - "jacob of serugh"
+  - aphrahat
+  - bardaisan
+  - "church of the east"
+  - "west syriac"
+  - "east syriac"
+  - "syro-malabar"
+  - "syriac orthodox"
+  - "aramaic christianity"
+  - "christian aramaic"
+  - "classical syriac"
+  - "syriac manuscript"
+  - "syriac literature"
+  - "syriac christianity"
+
+exclude_terms: []
+
+# OpenAlex API settings
+api:
+  base_url: "https://api.openalex.org"
+  # Set a contact email for the "polite pool" (higher rate limits, per OpenAlex etiquette).
+  mailto: "langoraorg@gmail.com"
+  per_page: 200

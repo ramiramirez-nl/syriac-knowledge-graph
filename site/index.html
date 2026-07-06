@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Syriac Studies Network — Prototype</title>
+<script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sigma@3.0.3/dist/sigma.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --graph-bg: #eceef2;
+    --panel: #ffffff;
+    --panel-border: #d7dbe2;
+    --text: #1c2027;
+    --text-dim: #666e7c;
+    --accent: #2f6fd1;
+    --accent-2: #b5750f;
+    --input-bg: #ffffff;
+    --hover-bg: #eef1f6;
+    --tooltip-bg: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  #app { display: grid; grid-template-columns: 300px 1fr 340px; grid-template-rows: 56px 1fr; height: 100vh; }
+
+  header { grid-column: 1 / 4; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px; border-bottom: 1px solid var(--panel-border); background: var(--panel); }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .2px; }
+  header .stats { font-size: 12px; color: var(--text-dim); display: flex; gap: 14px; }
+  header .stats b { color: var(--text); }
+
+  #sidebar-left { border-right: 1px solid var(--panel-border); background: var(--panel);
+    overflow-y: auto; padding: 14px; }
+  #sidebar-right { border-left: 1px solid var(--panel-border); background: var(--panel);
+    overflow-y: auto; padding: 14px; }
+  #graph-container { position: relative; background: var(--graph-bg); }
+  #graph { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim);
+    margin: 18px 0 8px; }
+  h2:first-child { margin-top: 0; }
+
+  input[type="text"] { width: 100%; padding: 8px 10px; background: var(--input-bg); border: 1px solid var(--panel-border);
+    border-radius: 6px; color: var(--text); font-size: 13px; outline: none; }
+  input[type="text"]:focus { border-color: var(--accent); }
+
+  label.toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
+
+  .seg { display: flex; border: 1px solid var(--panel-border); border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; background: var(--input-bg); color: var(--text-dim); border: none; padding: 7px 6px;
+    font-size: 11.5px; cursor: pointer; }
+  .seg button.active { background: var(--accent); color: #ffffff; font-weight: 600; }
+  .seg button:not(.active):hover { background: var(--hover-bg); color: var(--text); }
+
+  #search-results { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+  .result-item { padding: 6px 8px; border-radius: 5px; cursor: pointer; font-size: 12.5px; line-height: 1.4; }
+  .result-item:hover { background: var(--hover-bg); }
+  .result-item .r-title { color: var(--text); }
+  .result-item .r-meta { color: var(--text-dim); font-size: 11px; }
+
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); margin-bottom: 5px;
+    cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+  .legend-row:hover { background: var(--hover-bg); color: var(--text); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .legend-row .l-size { color: var(--text-dim); margin-left: auto; font-size: 11px; }
+
+  #detail-empty { color: var(--text-dim); font-size: 13px; margin-top: 40px; text-align: center; }
+  #detail-content { display: none; }
+  #detail-title { font-size: 15px; font-weight: 600; line-height: 1.35; margin-bottom: 6px; }
+  #detail-meta { font-size: 12px; color: var(--text-dim); margin-bottom: 14px; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .chip { background: var(--hover-bg); border: 1px solid var(--panel-border); color: var(--text);
+    font-size: 11.5px; padding: 4px 8px; border-radius: 12px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .link-item { font-size: 12px; padding: 5px 0; border-bottom: 1px dashed var(--panel-border); cursor: pointer; }
+  .link-item:hover { color: var(--accent); }
+  .link-item .l-year { color: var(--text-dim); margin-left: 4px; }
+  .empty-note { font-size: 12px; color: var(--text-dim); font-style: italic; }
+
+  .candidate-item { padding: 7px 8px; border-radius: 5px; cursor: pointer; font-size: 12px; margin-bottom: 3px; }
+  .candidate-item:hover { background: var(--hover-bg); }
+  .candidate-item .c-names { color: var(--text); line-height: 1.4; }
+  .candidate-item .c-score { color: var(--accent-2); font-size: 11px; }
+  .caveat { font-size: 11px; color: var(--text-dim); font-style: italic; line-height: 1.5; margin: 6px 0 10px; }
+
+  #tooltip { position: absolute; pointer-events: none; background: var(--tooltip-bg); border: 1px solid var(--panel-border);
+    border-radius: 6px; padding: 8px 10px; font-size: 12px; max-width: 280px; color: var(--text); display: none; z-index: 10;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+  #tooltip .t-title { font-weight: 600; margin-bottom: 3px; }
+  #tooltip .t-meta { color: var(--text-dim); font-size: 11px; }
+
+  #graph-hint { position: absolute; bottom: 10px; left: 10px; font-size: 11px; color: var(--text-dim);
+    background: rgba(255,255,255,.85); border: 1px solid var(--panel-border); padding: 4px 8px; border-radius: 5px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Syriac Studies Network <span style="color:var(--text-dim); font-weight:400;">— prototype</span></h1>
+    <div class="stats">
+      <span><b id="stat-works">–</b> works</span>
+      <span><b id="stat-authors">–</b> authors</span>
+      <span><b id="stat-citations">–</b> citation links</span>
+      <span><b id="stat-clusters">–</b> clusters</span>
+      <span><b id="stat-candidates">–</b> collab. candidates</span>
+    </div>
+  </header>
+
+  <div id="sidebar-left">
+    <h2>Search</h2>
+    <input type="text" id="search-input" placeholder="Search title or author…" autocomplete="off" />
+    <div id="search-results"></div>
+
+    <h2>Graph view</h2>
+    <div class="seg" id="view-toggle">
+      <button data-view="similarity" class="active">Similarity &amp; clusters</button>
+      <button data-view="citations">Citations only</button>
+    </div>
+    <label class="toggle" style="margin-top:10px;">
+      <input type="checkbox" id="toggle-isolated" />
+      <span id="toggle-isolated-label">Show works with no similarity link</span>
+    </label>
+
+    <h2 id="legend-title">Clusters (by size)</h2>
+    <div id="legend"></div>
+
+    <h2>Potential collaborations</h2>
+    <p class="caveat">
+      Author pairs whose titles are topically similar but who have never co-authored or
+      cited each other. Based on title text only — can be fooled by two people reviewing
+      the same book, or contributors to the same multi-volume series. Treat as leads to
+      check manually, not confirmed overlaps.
+    </p>
+    <div id="candidates-list"></div>
+
+    <h2>About</h2>
+    <p style="font-size:12px; color:var(--text-dim); line-height:1.5;">
+      Nodes are publications matching a Syriac Studies search term set (data: OpenAlex).
+      "Similarity &amp; clusters" combines citation links, shared-reference (bibliographic
+      coupling) and co-citation signals, and title-text similarity into one weighted graph,
+      clustered with the Leiden algorithm. Node size reflects OpenAlex-wide citation count.
+      Early prototype — most cross-references (books, non-English works) are still missing.
+    </p>
+  </div>
+
+  <div id="graph-container">
+    <div id="graph"></div>
+    <div id="tooltip"></div>
+    <div id="graph-hint">Click a node for details · scroll to zoom · drag to pan</div>
+  </div>
+
+  <div id="sidebar-right">
+    <div id="detail-empty">Select a node to see details.</div>
+    <div id="detail-content">
+      <div id="detail-title"></div>
+      <div id="detail-meta"></div>
+
+      <h2>Authors</h2>
+      <div class="chip-row" id="detail-authors"></div>
+
+      <h2>Cites (in this corpus)</h2>
+      <div id="detail-cites"></div>
+
+      <h2>Cited by (in this corpus)</h2>
+      <div id="detail-cited-by"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(async function () {
+  const Graph = graphology;
+  const container = document.getElementById("graph");
+
+  const res = await fetch("data.json");
+  const data = await res.json();
+
+  document.getElementById("stat-works").textContent = data.meta.workCount.toLocaleString();
+  document.getElementById("stat-authors").textContent = data.meta.authorCount.toLocaleString();
+  document.getElementById("stat-citations").textContent = data.meta.citationCount.toLocaleString();
+  document.getElementById("stat-clusters").textContent = data.meta.clusterCount.toLocaleString();
+  document.getElementById("stat-candidates").textContent = data.meta.collaborationCandidateCount.toLocaleString();
+
+  const worksById = new Map(data.works.map(w => [w.id, w]));
+  const authorsById = new Map(data.authors.map(a => [a.id, a]));
+  const clustersById = new Map(data.clusters.map(c => [c.id, c]));
+
+  let viewMode = "similarity"; // "similarity" | "citations"
+
+  // Degree per view mode, to identify isolated nodes.
+  const citationDegree = new Map();
+  const similarityDegree = new Map();
+  for (const w of data.works) { citationDegree.set(w.id, 0); similarityDegree.set(w.id, 0); }
+  for (const c of data.citations) {
+    citationDegree.set(c.source, (citationDegree.get(c.source) || 0) + 1);
+    citationDegree.set(c.target, (citationDegree.get(c.target) || 0) + 1);
+  }
+  for (const e of data.similarityEdges) {
+    similarityDegree.set(e.source, (similarityDegree.get(e.source) || 0) + 1);
+    similarityDegree.set(e.target, (similarityDegree.get(e.target) || 0) + 1);
+  }
+  function currentDegree(id) {
+    return (viewMode === "citations" ? citationDegree : similarityDegree).get(id) || 0;
+  }
+
+  // Decade color scale (used in "citations" view and as fallback for unclustered nodes).
+  const decadeColors = {
+    pre1900: "#5b5f6a",
+    1900: "#6f7c99", 1910: "#5b8fb0", 1920: "#4aa3a3", 1930: "#4aab84",
+    1940: "#6bb04a", 1950: "#a3b04a", 1960: "#c9a13d", 1970: "#d5842f",
+    1980: "#d5602f", 1990: "#c94a4a", 2000: "#b74ac9", 2010: "#8a4ac9",
+    2020: "#5b6bd5"
+  };
+  function decadeOf(year) {
+    if (!year) return null;
+    if (year < 1900) return "pre1900";
+    return Math.floor(year / 10) * 10;
+  }
+  function decadeColorOf(year) {
+    return decadeColors[decadeOf(year)] || "#8b93a1";
+  }
+
+  // Sigma's WebGL renderer only parses hex/rgb color strings — hsl() strings
+  // fail silently and render as black. Convert to hex ourselves.
+  function hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => {
+      const c = l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+      return Math.round(255 * c).toString(16).padStart(2, "0");
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+  }
+
+  // Deterministic per-cluster color using the golden angle for good hue spread.
+  const clusterColorCache = new Map();
+  function clusterColorOf(clusterId) {
+    if (clusterId === null || clusterId === undefined) return "#b8bdc7";
+    if (!clusterColorCache.has(clusterId)) {
+      const hue = (clusterId * 137.508) % 360;
+      clusterColorCache.set(clusterId, hslToHex(hue, 60, 45));
+    }
+    return clusterColorCache.get(clusterId);
+  }
+
+  function colorOf(w) {
+    if (viewMode === "similarity") {
+      // One consistent color language per view: cluster hue, or neutral gray
+      // for works not in any substantial cluster. (Falling back to decade
+      // colors here would make gray-cluster nodes indistinguishable from
+      // decade-colored ones.)
+      return clusterColorOf(w.clusterId);
+    }
+    return decadeColorOf(w.year);
+  }
+
+  // --- Legend (decade list or cluster list, depending on view) ---
+  const legendEl = document.getElementById("legend");
+  const legendTitleEl = document.getElementById("legend-title");
+  function renderLegend() {
+    if (viewMode === "citations") {
+      legendTitleEl.textContent = "Legend — publication decade";
+      const order = ["pre1900", 1900, 1910, 1920, 1930, 1940, 1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020];
+      legendEl.innerHTML = order.map(d => {
+        const label = d === "pre1900" ? "before 1900" : `${d}s`;
+        return `<div class="legend-row"><span class="legend-dot" style="background:${decadeColors[d]}"></span>${label}</div>`;
+      }).join("");
+    } else {
+      legendTitleEl.textContent = "Clusters (top terms, by size)";
+      const sorted = [...data.clusters].sort((a, b) => b.size - a.size).slice(0, 25);
+      legendEl.innerHTML = "";
+      for (const c of sorted) {
+        const row = document.createElement("div");
+        row.className = "legend-row";
+        row.innerHTML = `<span class="legend-dot" style="background:${clusterColorOf(c.id)}"></span>` +
+          `<span>${escapeHtml(c.topTerms.slice(0, 3).join(", ") || "(untitled cluster)")}</span>` +
+          `<span class="l-size">${c.size}</span>`;
+        row.addEventListener("click", () => focusCluster(c.id));
+        legendEl.appendChild(row);
+      }
+      const grayRow = document.createElement("div");
+      grayRow.className = "legend-row";
+      grayRow.style.cursor = "default";
+      grayRow.innerHTML = `<span class="legend-dot" style="background:${clusterColorOf(null)}"></span>` +
+        `<span>not in a cluster (too few links)</span>`;
+      legendEl.appendChild(grayRow);
+    }
+  }
+
+  // Node size from citedByCount (log scale, clamped).
+  function sizeOf(citedByCount) {
+    const v = Math.log((citedByCount || 0) + 1);
+    return Math.max(2.5, Math.min(14, 2.5 + v * 2.2));
+  }
+
+  const graph = new Graph();
+  for (const w of data.works) {
+    graph.addNode(w.id, {
+      label: w.title || "(untitled)",
+      x: w.x,
+      y: w.y,
+      size: sizeOf(w.citedByCount),
+      color: colorOf(w),
+      hidden: currentDegree(w.id) === 0,
+    });
+  }
+
+  function loadEdgesForView() {
+    graph.clearEdges();
+    const edgeList = viewMode === "citations" ? data.citations : data.similarityEdges;
+    for (const e of edgeList) {
+      if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+        const w = viewMode === "citations" ? 0.6 : Math.max(0.3, (e.weight || 0.2) * 2.5);
+        graph.addEdge(e.source, e.target, { size: w, color: "#c3c8d1" });
+      }
+    }
+  }
+  loadEdgesForView();
+
+  const renderer = new Sigma(graph, container, {
+    minCameraRatio: 0.05,
+    maxCameraRatio: 8,
+    defaultEdgeColor: "#c3c8d1",
+    defaultDrawNodeLabel: drawLabel,
+    defaultDrawNodeHover: drawLabel,
+    labelRenderedSizeThreshold: 8,
+    renderEdgeLabels: false,
+  });
+
+  // Sigma's built-in label renderer defaults to black text on a transparent
+  // canvas; add a light halo so labels stay readable over any node color.
+  function drawLabel(context, data, settings) {
+    if (!data.label) return;
+    const size = settings.labelSize;
+    const font = settings.labelFont;
+    const weight = settings.labelWeight;
+    context.font = `${weight} ${size}px ${font}`;
+    const x = data.x + data.size + 3;
+    const y = data.y + size / 3;
+
+    context.strokeStyle = "#eceef2";
+    context.lineWidth = 3;
+    context.lineJoin = "round";
+    context.strokeText(data.label, x, y);
+
+    context.fillStyle = "#1c2027";
+    context.fillText(data.label, x, y);
+  }
+
+  function repaintAllNodes() {
+    graph.forEachNode((id) => {
+      const w = worksById.get(id);
+      if (w) graph.setNodeAttribute(id, "color", colorOf(w));
+    });
+  }
+
+  function applyIsolatedVisibility() {
+    const show = document.getElementById("toggle-isolated").checked;
+    graph.forEachNode((id) => {
+      graph.setNodeAttribute(id, "hidden", !show && currentDegree(id) === 0);
+    });
+  }
+
+  // --- View toggle ---
+  const viewToggle = document.getElementById("view-toggle");
+  const isolatedLabel = document.getElementById("toggle-isolated-label");
+
+  // Single place that switches views, so button state, edges, colors,
+  // isolated-node visibility, and the legend never get out of sync.
+  function setViewMode(mode) {
+    if (viewMode === mode) return;
+    viewMode = mode;
+    [...viewToggle.querySelectorAll("button")].forEach(b => b.classList.toggle("active", b.dataset.view === mode));
+    isolatedLabel.textContent = mode === "citations"
+      ? "Show works with no citation link"
+      : "Show works with no similarity link";
+    loadEdgesForView();
+    repaintAllNodes();
+    applyIsolatedVisibility();
+    renderLegend();
+    renderer.refresh();
+  }
+
+  viewToggle.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-view]");
+    if (!btn) return;
+    setViewMode(btn.dataset.view);
+  });
+
+  // --- Toggle isolated nodes ---
+  document.getElementById("toggle-isolated").addEventListener("change", () => {
+    applyIsolatedVisibility();
+    renderer.refresh();
+  });
+
+  renderLegend();
+
+  // --- Tooltip on hover ---
+  const tooltip = document.getElementById("tooltip");
+  renderer.on("enterNode", ({ node }) => {
+    const w = worksById.get(node);
+    if (!w) return;
+    const clusterInfo = w.clusterId !== null && clustersById.has(w.clusterId)
+      ? ` · cluster: ${escapeHtml(clustersById.get(w.clusterId).topTerms.slice(0, 3).join(", "))}`
+      : "";
+    tooltip.innerHTML = `<div class="t-title">${escapeHtml(w.title || "(untitled)")}</div>
+      <div class="t-meta">${w.year || "n.d."} · ${escapeHtml(w.venue || "unknown venue")} · ${w.citedByCount} citations${clusterInfo}</div>`;
+    tooltip.style.display = "block";
+  });
+  renderer.on("leaveNode", () => { tooltip.style.display = "none"; });
+  container.addEventListener("mousemove", (e) => {
+    const rect = container.getBoundingClientRect();
+    tooltip.style.left = (e.clientX - rect.left + 14) + "px";
+    tooltip.style.top = (e.clientY - rect.top + 14) + "px";
+  });
+
+  // --- Selection state & highlighting ---
+  function highlightNode(nodeId) {
+    const neighbors = new Set(graph.neighbors(nodeId));
+    neighbors.add(nodeId);
+    graph.forEachNode((id) => {
+      const dim = !neighbors.has(id);
+      graph.setNodeAttribute(id, "color", dim ? "#d3d7de" : colorOf(worksById.get(id)));
+    });
+    graph.forEachEdge((edgeId, attrs, source, target) => {
+      const active = source === nodeId || target === nodeId;
+      graph.setEdgeAttribute(edgeId, "color", active ? "#b5750f" : "#dde1e7");
+      graph.setEdgeAttribute(edgeId, "size", active ? 1.4 : 0.4);
+    });
+    renderer.refresh();
+  }
+
+  function highlightSet(nodeIds) {
+    const keep = new Set(nodeIds);
+    graph.forEachNode((id) => {
+      graph.setNodeAttribute(id, "color", keep.has(id) ? colorOf(worksById.get(id)) : "#d3d7de");
+      if (keep.has(id)) graph.setNodeAttribute(id, "hidden", false);
+    });
+    graph.forEachEdge((edgeId, attrs, source, target) => {
+      const active = keep.has(source) && keep.has(target);
+      graph.setEdgeAttribute(edgeId, "color", active ? "#b5750f" : "#dde1e7");
+      graph.setEdgeAttribute(edgeId, "size", active ? 1.2 : 0.3);
+    });
+    renderer.refresh();
+  }
+
+  function clearHighlight() {
+    repaintAllNodes();
+    graph.forEachEdge((edgeId) => {
+      graph.setEdgeAttribute(edgeId, "color", "#c3c8d1");
+      graph.setEdgeAttribute(edgeId, "size", viewMode === "citations" ? 0.6 : 0.5);
+    });
+    renderer.refresh();
+  }
+
+  renderer.on("clickNode", ({ node }) => {
+    graph.setNodeAttribute(node, "hidden", false);
+    selectWork(node);
+    highlightNode(node);
+    focusCamera(node);
+  });
+  renderer.on("clickStage", () => {
+    clearHighlight();
+    document.getElementById("detail-empty").style.display = "block";
+    document.getElementById("detail-content").style.display = "none";
+  });
+
+  function focusCamera(nodeId) {
+    const pos = renderer.getNodeDisplayData(nodeId);
+    if (!pos) return;
+    renderer.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.25 }, { duration: 400 });
+  }
+
+  function focusOnNodes(nodeIds) {
+    const positions = nodeIds.map(id => renderer.getNodeDisplayData(id)).filter(Boolean);
+    if (positions.length === 0) return;
+    const cx = positions.reduce((s, p) => s + p.x, 0) / positions.length;
+    const cy = positions.reduce((s, p) => s + p.y, 0) / positions.length;
+    renderer.getCamera().animate({ x: cx, y: cy, ratio: 0.5 }, { duration: 400 });
+  }
+
+  function focusCluster(clusterId) {
+    const memberIds = data.works.filter(w => w.clusterId === clusterId).map(w => w.id);
+    setViewMode("similarity");
+    highlightSet(memberIds);
+    focusOnNodes(memberIds);
+  }
+
+  // --- Detail panel ---
+  function selectWork(nodeId) {
+    const w = worksById.get(nodeId);
+    if (!w) return;
+    document.getElementById("detail-empty").style.display = "none";
+    document.getElementById("detail-content").style.display = "block";
+    document.getElementById("detail-title").textContent = w.title || "(untitled)";
+    const clusterLabel = w.clusterId !== null && clustersById.has(w.clusterId)
+      ? ` · cluster: ${clustersById.get(w.clusterId).topTerms.slice(0, 3).join(", ")}`
+      : "";
+    document.getElementById("detail-meta").textContent =
+      `${w.year || "n.d."} · ${w.venue || "unknown venue"} · ${w.type || ""} · ${w.citedByCount} citations (OpenAlex-wide)${clusterLabel}`;
+
+    const authorsEl = document.getElementById("detail-authors");
+    authorsEl.innerHTML = "";
+    if (w.authors.length === 0) {
+      authorsEl.innerHTML = '<span class="empty-note">No author data.</span>';
+    }
+    for (const a of w.authors) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = a.name || "unknown";
+      chip.title = "Show this author's other works";
+      chip.addEventListener("click", () => showAuthorWorks(a.id, a.name));
+      authorsEl.appendChild(chip);
+    }
+
+    const citesEl = document.getElementById("detail-cites");
+    const citedByEl = document.getElementById("detail-cited-by");
+    citesEl.innerHTML = "";
+    citedByEl.innerHTML = "";
+
+    const cites = data.citations.filter(c => c.source === nodeId).map(c => worksById.get(c.target)).filter(Boolean);
+    const citedBy = data.citations.filter(c => c.target === nodeId).map(c => worksById.get(c.source)).filter(Boolean);
+
+    renderLinkList(citesEl, cites);
+    renderLinkList(citedByEl, citedBy);
+  }
+
+  function renderLinkList(el, works) {
+    if (works.length === 0) {
+      el.innerHTML = '<span class="empty-note">None in this corpus.</span>';
+      return;
+    }
+    for (const w of works) {
+      const item = document.createElement("div");
+      item.className = "link-item";
+      item.innerHTML = `${escapeHtml(w.title || "(untitled)")}<span class="l-year">${w.year || ""}</span>`;
+      item.addEventListener("click", () => {
+        graph.setNodeAttribute(w.id, "hidden", false);
+        selectWork(w.id);
+        highlightNode(w.id);
+        focusCamera(w.id);
+      });
+      el.appendChild(item);
+    }
+  }
+
+  function showAuthorWorks(authorId, authorName) {
+    const author = authorsById.get(authorId);
+    document.getElementById("detail-empty").style.display = "none";
+    document.getElementById("detail-content").style.display = "block";
+    document.getElementById("detail-title").textContent = authorName || "Unknown author";
+    document.getElementById("detail-meta").textContent = author ? `${author.workIds.length} work(s) in this corpus` : "";
+    document.getElementById("detail-authors").innerHTML = "";
+    const citesDiv = document.getElementById("detail-cites");
+    citesDiv.innerHTML = "";
+    // Reset the cites header too — it may still say "X's works" if the user
+    // came here from a collaboration-candidate view.
+    citesDiv.previousElementSibling.textContent = "Cites (in this corpus)";
+    const worksEl = document.getElementById("detail-cited-by");
+    document.getElementById("detail-cited-by").previousElementSibling.textContent = "Works by this author";
+    worksEl.innerHTML = "";
+    if (!author) return;
+    const authorWorks = author.workIds.map(id => worksById.get(id)).filter(Boolean);
+    renderLinkList(worksEl, authorWorks);
+    highlightSet(authorWorks.map(w => w.id));
+    focusOnNodes(authorWorks.map(w => w.id));
+  }
+
+  function showCollaborationCandidate(authorAId, authorBId) {
+    const a = authorsById.get(authorAId);
+    const b = authorsById.get(authorBId);
+    if (!a || !b) return;
+    document.getElementById("detail-empty").style.display = "none";
+    document.getElementById("detail-content").style.display = "block";
+    document.getElementById("detail-title").textContent = `${a.name} ↔ ${b.name}`;
+    document.getElementById("detail-meta").textContent =
+      "No existing co-authorship or citation link between these two authors in this corpus.";
+    document.getElementById("detail-authors").innerHTML = "";
+    document.getElementById("detail-cites").innerHTML = "";
+    document.getElementById("detail-cites").previousElementSibling.textContent = `${a.name}'s works`;
+    document.getElementById("detail-cited-by").previousElementSibling.textContent = `${b.name}'s works`;
+
+    const aWorks = a.workIds.map(id => worksById.get(id)).filter(Boolean);
+    const bWorks = b.workIds.map(id => worksById.get(id)).filter(Boolean);
+    renderLinkList(document.getElementById("detail-cites"), aWorks);
+    renderLinkList(document.getElementById("detail-cited-by"), bWorks);
+
+    const allIds = [...aWorks, ...bWorks].map(w => w.id);
+    setViewMode("similarity");
+    highlightSet(allIds);
+    focusOnNodes(allIds);
+  }
+
+  // Restore section labels when going back to a plain work view.
+  const citesHeader = document.getElementById("detail-cites").previousElementSibling;
+  const citedByHeader = document.getElementById("detail-cited-by").previousElementSibling;
+  const originalCitesLabel = citesHeader.textContent;
+  const originalCitedByLabel = citedByHeader.textContent;
+  const origSelectWork = selectWork;
+  selectWork = function (nodeId) {
+    citesHeader.textContent = originalCitesLabel;
+    citedByHeader.textContent = originalCitedByLabel;
+    origSelectWork(nodeId);
+  };
+
+  // --- Collaboration candidates panel ---
+  const candidatesListEl = document.getElementById("candidates-list");
+  const topCandidates = data.collaborationCandidates.slice(0, 60);
+  for (const cand of topCandidates) {
+    const a = authorsById.get(cand.authorA);
+    const b = authorsById.get(cand.authorB);
+    if (!a || !b) continue;
+    const item = document.createElement("div");
+    item.className = "candidate-item";
+    item.innerHTML = `<div class="c-names">${escapeHtml(a.name)} ↔ ${escapeHtml(b.name)}</div>` +
+      `<div class="c-score">similarity ${(cand.similarity * 100).toFixed(0)}%</div>`;
+    item.addEventListener("click", () => showCollaborationCandidate(cand.authorA, cand.authorB));
+    candidatesListEl.appendChild(item);
+  }
+  if (topCandidates.length === 0) {
+    candidatesListEl.innerHTML = '<span class="empty-note">No candidates found.</span>';
+  }
+
+  // --- Search ---
+  const searchInput = document.getElementById("search-input");
+  const searchResults = document.getElementById("search-results");
+  searchInput.addEventListener("input", () => {
+    const q = searchInput.value.trim().toLowerCase();
+    searchResults.innerHTML = "";
+    if (q.length < 2) return;
+
+    const workMatches = data.works
+      .filter(w => (w.title || "").toLowerCase().includes(q))
+      .slice(0, 12);
+    const authorMatches = data.authors
+      .filter(a => (a.name || "").toLowerCase().includes(q))
+      .slice(0, 8);
+
+    for (const w of workMatches) {
+      const item = document.createElement("div");
+      item.className = "result-item";
+      item.innerHTML = `<div class="r-title">${escapeHtml(w.title || "(untitled)")}</div><div class="r-meta">${w.year || ""} · work</div>`;
+      item.addEventListener("click", () => {
+        graph.setNodeAttribute(w.id, "hidden", false);
+        selectWork(w.id);
+        highlightNode(w.id);
+        focusCamera(w.id);
+      });
+      searchResults.appendChild(item);
+    }
+    for (const a of authorMatches) {
+      const item = document.createElement("div");
+      item.className = "result-item";
+      item.innerHTML = `<div class="r-title">${escapeHtml(a.name || "unknown")}</div><div class="r-meta">${a.workIds.length} work(s) · author</div>`;
+      item.addEventListener("click", () => showAuthorWorks(a.id, a.name));
+      searchResults.appendChild(item);
+    }
+  });
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // Dev/QA hook only — lets us drive node selection from automated checks.
+  window.__debug = {
+    graph, renderer, data, selectWork, highlightNode, highlightSet, focusCamera, focusOnNodes,
+    showAuthorWorks, showCollaborationCandidate, focusCluster, authorsById, worksById,
+    getViewMode: () => viewMode,
+  };
+})();
+</script>
+</body>
+</html>
