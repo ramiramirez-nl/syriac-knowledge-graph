@@ -24,6 +24,13 @@
   html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   #app { display: grid; grid-template-columns: 300px 1fr 340px; grid-template-rows: 56px 1fr; height: 100vh; }
+  /* No node/author/candidate selected yet: collapse the detail panel so the
+     graph gets the full width instead of wasting space on an empty panel.
+     (No transition here: the graph's WebGL render loop can stall animation-
+     frame sampling under load, which left a CSS transition on this property
+     visibly stuck at its start value instead of animating through.) */
+  #app.no-selection { grid-template-columns: 300px 1fr 0; }
+  #app.no-selection #sidebar-right { padding: 0; border-left: none; overflow: hidden; }
 
   header { grid-column: 1 / 4; display: flex; align-items: center; justify-content: space-between;
     padding: 0 16px; border-bottom: 1px solid var(--panel-border); background: var(--panel); }
@@ -96,7 +103,7 @@
 </style>
 </head>
 <body>
-<div id="app">
+<div id="app" class="no-selection">
   <header>
     <h1>Syriac Studies Network <span style="color:var(--text-dim); font-weight:400;">— prototype</span></h1>
     <div class="stats">
@@ -467,9 +474,22 @@
   });
   renderer.on("clickStage", () => {
     clearHighlight();
+    hideDetailPanel();
+  });
+
+  // Single place that toggles the right-hand detail panel, so its visibility
+  // and the #app.no-selection collapse (which widens the graph when nothing
+  // is selected) can never drift out of sync.
+  function showDetailPanel() {
+    document.getElementById("detail-empty").style.display = "none";
+    document.getElementById("detail-content").style.display = "block";
+    document.getElementById("app").classList.remove("no-selection");
+  }
+  function hideDetailPanel() {
     document.getElementById("detail-empty").style.display = "block";
     document.getElementById("detail-content").style.display = "none";
-  });
+    document.getElementById("app").classList.add("no-selection");
+  }
 
   function focusCamera(nodeId) {
     const pos = renderer.getNodeDisplayData(nodeId);
@@ -496,8 +516,7 @@
   function selectWork(nodeId) {
     const w = worksById.get(nodeId);
     if (!w) return;
-    document.getElementById("detail-empty").style.display = "none";
-    document.getElementById("detail-content").style.display = "block";
+    showDetailPanel();
     document.getElementById("detail-title").textContent = w.title || "(untitled)";
     const clusterLabel = w.clusterId !== null && clustersById.has(w.clusterId)
       ? ` · cluster: ${clustersById.get(w.clusterId).topTerms.slice(0, 3).join(", ")}`
@@ -552,8 +571,7 @@
 
   function showAuthorWorks(authorId, authorName) {
     const author = authorsById.get(authorId);
-    document.getElementById("detail-empty").style.display = "none";
-    document.getElementById("detail-content").style.display = "block";
+    showDetailPanel();
     document.getElementById("detail-title").textContent = authorName || "Unknown author";
     document.getElementById("detail-meta").textContent = author ? `${author.workIds.length} work(s) in this corpus` : "";
     document.getElementById("detail-authors").innerHTML = "";
@@ -576,8 +594,7 @@
     const a = authorsById.get(authorAId);
     const b = authorsById.get(authorBId);
     if (!a || !b) return;
-    document.getElementById("detail-empty").style.display = "none";
-    document.getElementById("detail-content").style.display = "block";
+    showDetailPanel();
     document.getElementById("detail-title").textContent = `${a.name} ↔ ${b.name}`;
     document.getElementById("detail-meta").textContent =
       "No existing co-authorship or citation link between these two authors in this corpus.";
