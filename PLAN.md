@@ -224,3 +224,25 @@ ile TF-IDF'in değiştirilmesi, kitap-eleştirisi tespitinin sağlamlaştırılm
   → tek `setViewMode` yardımcısına toplandı; (4) yazar sıralaması alfabetikti
   ('first'<'last'<'middle'), orta yazarlar sona düşüyordu → CASE ile düzeltildi;
   (5) aday görünümünden yazar görünümüne geçişte bayat panel başlığı → sıfırlanıyor.
+- 2026-07-06: Book review'lar korpustan tamamen çıkarıldı (kullanıcı isteği —
+  eleştiriler orijinal araştırma değil, ayrıca birbirine neredeyse özdeş
+  başlıklarıyla sahte kümeleme/işbirliği sinyali üretiyorlardı). Önceki
+  `is_review_like()` sezgiseli sadece TF-IDF sinyalinden dışlıyordu; şimdi
+  `scripts/remove_reviews.py` ile veritabanından (works + authorship +
+  citations + work_references, artık yazarsız kalan yazarlar dahil) kalıcı
+  olarak siliniyor. Filtre iki turda düzeltildi: (1) `<i>`/`<b>` HTML
+  markup'ı sinyal olmaktan çıkarıldı — gerçek makale başlıklarında da
+  geçiyordu (örn. "...the *Life of Anthony*"), ~140 yanlış pozitife yol
+  açıyordu; (2) sayfa sayısı deseni boşluksuz varyantları da ("182pp.")
+  yakalayacak şekilde genişletildi, "book review" alt-dize olarak da
+  aranır oldu (parantez/köşeli parantez varyantları için). Sonuç: 373 book
+  review silindi (5,733 → 5,360 eser), 161 tek-katkılı yazar da onlarla
+  birlikte düştü (5,360/2,510). Kalan bir sınır durum (bir eleştiri
+  metninde "pp. 283–292" gibi içerik-içi sayfa referansı) bilinçli olarak
+  dışarıda bırakıldı — gerçek review değil, atlanan bir cilt içindeki
+  makaleleri özetliyor.
+- 2026-07-06: `site/index.html`'deki `fetch("data.json")` çağrısına
+  `cache: "no-cache"` eklendi — tarayıcı önbelleği, pipeline her yeniden
+  çalıştığında güncellenen data.json'u sunucudan doğrulamadan eski haliyle
+  sunuyordu (test sırasında keşfedildi, üretimde dönen ziyaretçileri de
+  etkilerdi).

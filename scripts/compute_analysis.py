@@ -61,11 +61,23 @@ TOP_COLLABORATION_CANDIDATES = 300
 
 
 REVIEW_TITLE_PREFIXES = ("book review", "review of", "review essay", "review article")
+# "book review" as a substring (not just prefix) catches parenthetical/bracketed
+# markers like "... (Book Review)" or "... [Book Review]" appended after the
+# reviewed work's own title.
+REVIEW_TITLE_SUBSTRINGS = ("book review",)
 # Substring markers typical of review/citation-style entries: publisher
-# metadata (ISBN, page counts, price), edited-volume framing ("ed. by",
-# "eds.)"), or embedded HTML markup used to typeset the reviewed work's
-# own title/author within the review's title.
-REVIEW_TITLE_MARKERS = ("isbn", " pp.", "review:", " ed. ", "eds.)", "(hb)", "(pb)", "<i>", "<b>", " €", "$")
+# metadata (ISBN, price) or edited-volume framing ("ed. by", "eds.)").
+# NOTE: "<i>"/"<b>" markup was deliberately dropped from this list — it also
+# appears in ordinary article titles that italicize a referenced work's name
+# (e.g. "The Greek and Syriac Versions of the <i>Life of Anthony</i>"), which
+# made the heuristic flag ~140 legitimate articles as reviews. Price/ISBN
+# markers alone reliably catch true reviews, since genuine reviews almost
+# always carry that publisher metadata too.
+REVIEW_TITLE_MARKERS = ("isbn", "review:", " ed. ", "eds.)", "(hb)", "(pb)", " €", "$")
+# Page-count marker ("182pp." or "182 pp.") — no space before "pp." is common
+# in older review citations, so match on a preceding digit rather than requiring
+# a space.
+REVIEW_PAGECOUNT = re.compile(r"\d+\s*pp\.")
 # Citation-style suffix commonly used when a review's title is just the
 # reviewed book's title followed by its author, e.g. "... . By SEBASTIAN BROCK."
 REVIEW_BY_AUTHOR_SUFFIX = re.compile(r"\.\s*by\s+[a-z][a-z.\s]{2,40}\.?\s*$", re.IGNORECASE)
@@ -82,7 +94,11 @@ def is_review_like(title: str, work_type: str) -> bool:
     t = (title or "").strip().lower()
     if any(t.startswith(p) for p in REVIEW_TITLE_PREFIXES):
         return True
+    if any(s in t for s in REVIEW_TITLE_SUBSTRINGS):
+        return True
     if any(marker in t for marker in REVIEW_TITLE_MARKERS):
+        return True
+    if REVIEW_PAGECOUNT.search(t):
         return True
     return bool(REVIEW_BY_AUTHOR_SUFFIX.search(t))
 

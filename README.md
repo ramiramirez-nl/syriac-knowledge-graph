@@ -15,8 +15,8 @@ Syriac Studies Network maps relationships between academic publications in Syria
 
 ## Current Status: Phase 1 Complete ✓
 
-- ✅ **Phase 0**: Data collection from OpenAlex (5,733 works, 2,671 authors)
-- ✅ **Phase 1**: Bibliometric analysis & clustering (96 thematic clusters)
+- ✅ **Phase 0**: Data collection from OpenAlex (5,360 works, 2,510 authors — book reviews removed, see below)
+- ✅ **Phase 1**: Bibliometric analysis & clustering (95 thematic clusters)
 - ⏳ **Phase 2**: Curation UI (duplicate detection, manual filtering)
 - 🔮 **Phase 3**: Community platform (user registration, profiles, member contributions)
 
@@ -47,6 +47,9 @@ uv run main.py
 ```bash
 # Fetch fresh works from OpenAlex
 uv run scripts/fetch_openalex.py
+
+# Remove book reviews (out of scope — see Known Limitations)
+uv run scripts/remove_reviews.py
 
 # Compute similarity graph & clusters
 uv run scripts/compute_analysis.py
@@ -79,6 +82,7 @@ config/
 
 scripts/
 ├── fetch_openalex.py    # ETL: OpenAlex → SQLite
+├── remove_reviews.py    # Cleanup: strip book reviews from corpus
 ├── compute_analysis.py  # Phase 1: Similarity graph, clustering
 ├── export_json.py       # Export normalized data for static site
 
@@ -123,7 +127,7 @@ Combined graph: 11,547 edges, spring-layout node positions pre-computed server-s
 
 - No backend server required for Phases 1–2
 - JSON data bundled once per analysis run
-- Sigma.js WebGL canvas for rendering 5,733 nodes + 11,547 edges in-browser
+- Sigma.js WebGL canvas for rendering 5,360 nodes + 12,091 edges in-browser
 - Light theme for readability
 
 ## Known Limitations
@@ -132,7 +136,7 @@ See **PLAN.md** for detailed trade-offs. Key issues:
 
 1. **Short-title false positives**: Titles with <3 distinctive terms (e.g., "The Church of the East") produce ~100% TF-IDF similarity against other short titles. *Mitigation*: Filtered from TF-IDF signal; future work will use multilingual semantic embeddings (multilingual-e5).
 
-2. **Book review artifacts**: Some book reviews indexed as separate works. *Mitigation*: Filtered by review-type keywords and pagination/ISBN patterns; similarity capped at 0.97.
+2. **Book review artifacts**: OpenAlex indexes book reviews as separate works with near-identical titles to each other (both echo the reviewed book's title), which created false clustering/collaboration signals. *Mitigation*: Fully removed from the corpus via `scripts/remove_reviews.py` (373 removed), detected by review-type tag, title prefixes ("Review of...", "Book Review"), and citation-style markers (ISBN, price, page count). A handful of true reviews may still slip through if their titles don't match any marker.
 
 3. **OpenAlex duplicates**: Same paper indexed twice with different IDs and inconsistent author lists. *Mitigation*: Detected via duplicate-title pairs in collaboration candidates.
 

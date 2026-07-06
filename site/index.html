@@ -174,7 +174,10 @@
   const Graph = graphology;
   const container = document.getElementById("graph");
 
-  const res = await fetch("data.json");
+  // "no-cache" forces revalidation with the server on every load instead of
+  // trusting a stale cached copy — data.json changes each time the analysis
+  // pipeline re-runs, so a returning visitor should always see current data.
+  const res = await fetch("data.json", { cache: "no-cache" });
   const data = await res.json();
 
   document.getElementById("stat-works").textContent = data.meta.workCount.toLocaleString();
