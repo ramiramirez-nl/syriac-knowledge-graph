@@ -78,10 +78,10 @@ def main() -> None:
             "hasCitation": bool(row["has_citation"]),
             "coupling": row["coupling"],
             "cocitation": row["cocitation"],
-            "tfidf": row["tfidf"],
+            "embedding": row["embedding"],
         }
         for row in conn.execute(
-            "SELECT work_id_a, work_id_b, weight, has_citation, coupling, cocitation, tfidf FROM similarity_edges"
+            "SELECT work_id_a, work_id_b, weight, has_citation, coupling, cocitation, embedding FROM similarity_edges"
         )
     ]
 
