@@ -33,15 +33,15 @@ The primary goal of this project is to provide a bird's-eye view of the field of
 
 ## Current Status
 
-- ✅ **Data Pipeline**: Automated data collection from OpenAlex (filtered & cleaned).
-- ✅ **Analysis Engine**: Bibliometric analysis & thematic clustering (dynamically optimized into visually distinct clusters).
-- ✅ **Interactive UI**: WebGL-powered graph visualization with node-hover interactions and curated color palettes.
-- 🚧 **Curation & Auth**: Admin panel and user authentication prototype active.
-- 🔮 **Community Platform**: Coming next (User-contributed corrections, profiles, discussion threads).
+- **Data Pipeline**: Automated data collection from OpenAlex, review cleanup, incremental updates, and JSON export.
+- **Analysis Engine**: Bibliometric analysis, multilingual semantic similarity, and Leiden thematic clustering.
+- **Interactive UI**: WebGL-powered graph visualization with search, detail panels, cluster exploration, and collaboration hints.
+- **Curation & Auth**: FastAPI backend, admin authentication, manual work entry/editing, duplicate review, false-positive exclusion, and BibTeX import.
+- **Community Platform**: Phase 3 is next: notifications, production hosting, and richer member-facing workflows.
 
 ## Corpus Composition
 
-The corpus currently contains **~7,000 works** from multiple publication types:
+The current exported corpus contains **6,554 works** and **2,779 authors** from multiple publication types:
 
 | Type | Count | Description |
 |---|---|---|
@@ -59,7 +59,7 @@ Data is primarily sourced from **OpenAlex** (open-access academic metadata), sup
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.12+
 - `uv` package manager (recommended) or standard `pip`
 - Docker (optional)
 
@@ -121,46 +121,46 @@ uv run scripts/export_json.py
 
 ## Architecture
 
-### Three-Signal Similarity
+### Four-Signal Similarity
 
 Weighted combination for discovery:
 - **Citation** (0.35): Direct work-to-work citation edges
 - **Bibliographic coupling** (0.30): Works sharing external references
 - **Co-citation** (0.20): Works cited together by a third work
-- **Semantic Text** (0.15): Title token overlap (filtered for robustness)
+- **Semantic Text** (0.15): Multilingual text embeddings for title-level semantic similarity
 
 ### Leiden Clustering
 
 - The algorithm groups nodes into communities (clusters).
-- Resolution is tuned to ~1.2 to provide balanced and distinct sub-topics (yielding ~37 major clusters).
+- The current export contains 41 substantial clusters.
 - Dynamic color palettes assign distinct, visually appealing colors to clusters, cycling to ensure visual clarity.
 
 ### Tech Stack
 
 - **Data**: OpenAlex API (open-access metadata)
 - **ETL**: Python, SQLite, networkx
-- **Analysis**: Leiden clustering, TF-IDF (scikit-learn)
+- **Analysis**: Leiden clustering, multilingual-e5 semantic embeddings, bibliographic coupling, co-citation
 - **Visualization**: Sigma.js (WebGL graph rendering)
 - **Frontend**: Vanilla JS, HTML, CSS
 - **Backend**: FastAPI (serves static files, auth, and admin endpoints)
 
 ## Known Limitations
 
-1. **Short-title false positives**: Titles with <3 distinctive terms can produce false similarities. We've mitigated this by filtering the TF-IDF signal, with future updates aiming for multilingual semantic embeddings.
+1. **Title-only semantics**: Multilingual embeddings are stronger than the earlier TF-IDF signal, but title-only similarity still needs curator judgment for short or generic titles.
 2. **Book review artifacts**: OpenAlex indexes book reviews as separate works with near-identical titles. We actively filter these out (`scripts/remove_reviews.py`).
-3. **OpenAlex duplicates**: The same paper can be indexed twice. Duplicate detection logic helps highlight these in the curation admin.
+3. **OpenAlex duplicates**: The same paper can be indexed twice. Duplicate detection logic helps highlight these in the curation admin; the current integrity check reports 23 duplicate DOI groups for review.
 
 ## Roadmap
 
-### Phase 2: Curation (In Progress)
-- Duplicate record detection & merge UI
+### Phase 2: Curation (Completed)
+- Duplicate record detection and merge tooling
 - Manual false-positive filtering
-- BibTeX/RIS/Zotero import
+- BibTeX import and admin-authenticated curation workflows
 
 ### Phase 3: Community Platform
-- User registration & profiles
-- Member-contributed data with moderation workflow
-- Author disambiguation & verification
+- Notifications for new related publications or researchers
+- Production hosting for the full authenticated app
+- Richer member profiles and contribution workflows
 
 ## Contributing
 
