@@ -273,13 +273,19 @@
     
     const rank = clusterRanks.get(clusterId);
     
-    // Only the top 20 largest clusters get a distinct color.
-    // The rest fall back to a neutral pale gray to reduce visual noise.
-    if (rank === undefined || rank >= 20) return "#d1d5db";
+    if (rank === undefined) return "#d1d5db";
 
     if (!clusterColorCache.has(clusterId)) {
+      const cycle = Math.floor(rank / baseHues.length);
       const paletteIdx = rank % baseHues.length;
       let [h, s, l] = baseHues[paletteIdx];
+      
+      // If we run out of palette colors, cycle through them but darken slightly
+      // so they are still distinct from the first cycle.
+      if (cycle > 0) {
+        l = Math.max(15, l - (cycle * 12));
+      }
+      
       clusterColorCache.set(clusterId, hslToHex(h, s, l));
     }
     return clusterColorCache.get(clusterId);
