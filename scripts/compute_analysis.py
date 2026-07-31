@@ -233,7 +233,7 @@ def run_leiden(work_ids: list[str], edges: dict[tuple, float]):
     g.es["weight"] = list(edges.values())
 
     partition = leidenalg.find_partition(
-        g, leidenalg.RBConfigurationVertexPartition, weights="weight", seed=42, resolution_parameter=0.4
+        g, leidenalg.RBConfigurationVertexPartition, weights="weight", seed=42, resolution_parameter=1.2
     )
     membership = partition.membership
     return {work_ids[i]: membership[i] for i in range(len(work_ids))}
