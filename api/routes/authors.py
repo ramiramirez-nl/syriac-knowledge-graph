@@ -4,7 +4,7 @@ from typing import List
 
 from api.database import get_db
 from api.models import Author, AuthorUpdate, MergeAuthorsRequest
-from api.auth import get_current_user
+from api.auth import get_current_user, get_current_admin
 
 router = APIRouter()
 
@@ -25,7 +25,7 @@ def get_authors(skip: int = 0, limit: int = 50, q: str = None, db: sqlite3.Conne
     return [dict(row) for row in rows]
 
 @router.post("/merge")
-def merge_authors(request: MergeAuthorsRequest, db: sqlite3.Connection = Depends(get_db)):
+def merge_authors(request: MergeAuthorsRequest, db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     try:
         for sec_id in request.secondary_ids:
             db.execute("UPDATE OR IGNORE authorship SET author_id = ? WHERE author_id = ?", (request.primary_id, sec_id))

@@ -82,11 +82,18 @@ def check_export(conn: sqlite3.Connection) -> list[Result]:
     except (OSError, json.JSONDecodeError) as exc:
         return [Result("ERROR", f"Cannot read export: {exc}")]
 
+    # The export excludes soft-deleted/excluded works and any edges touching
+    # them (see export_json.py), so the expected counts must mirror that.
+    active = "status NOT IN ('deleted','excluded')"
     expected = {
-        "workCount": scalar(conn, "SELECT COUNT(*) FROM works"),
+        "workCount": scalar(conn, f"SELECT COUNT(*) FROM works WHERE {active}"),
         "authorCount": scalar(conn, "SELECT COUNT(*) FROM authors WHERE id IN (SELECT DISTINCT author_id FROM authorship)"),
-        "citationCount": scalar(conn, "SELECT COUNT(*) FROM citations"),
-        "similarityEdgeCount": scalar(conn, "SELECT COUNT(*) FROM similarity_edges"),
+        "citationCount": scalar(conn, f"""SELECT COUNT(*) FROM citations c
+            JOIN works a ON a.id=c.citing_work_id AND a.{active}
+            JOIN works b ON b.id=c.cited_work_id AND b.{active}"""),
+        "similarityEdgeCount": scalar(conn, f"""SELECT COUNT(*) FROM similarity_edges e
+            JOIN works a ON a.id=e.work_id_a AND a.{active}
+            JOIN works b ON b.id=e.work_id_b AND b.{active}"""),
         "clusterCount": scalar(conn, "SELECT COUNT(*) FROM clusters WHERE size >= 3"),
         "collaborationCandidateCount": scalar(conn, "SELECT COUNT(*) FROM collaboration_candidates"),
     }

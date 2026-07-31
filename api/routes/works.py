@@ -5,6 +5,7 @@ import uuid
 
 from api.database import get_db
 from api.models import Work, WorkCreate, WorkUpdate, MergeWorksRequest
+from api.auth import get_current_admin
 
 router = APIRouter()
 
@@ -37,7 +38,7 @@ def get_works(skip: int = 0, limit: int = 50, q: str = None, db: sqlite3.Connect
     return works_list
 
 @router.post("", response_model=Work)
-def create_work(work: WorkCreate, db: sqlite3.Connection = Depends(get_db)):
+def create_work(work: WorkCreate, db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     work_id = work.id or f"manual:{uuid.uuid4().hex[:8]}"
     
     try:
@@ -81,14 +82,14 @@ def _get_single_work(db: sqlite3.Connection, work_id: str):
     return work_dict
 
 @router.delete("/{work_id}")
-def delete_work(work_id: str, db: sqlite3.Connection = Depends(get_db)):
+def delete_work(work_id: str, db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     # Soft delete
     db.execute("UPDATE works SET status = 'deleted' WHERE id = ?", (work_id,))
     db.commit()
     return {"message": "Work soft-deleted successfully"}
 
 @router.put("/{work_id}")
-def update_work(work_id: str, work_update: WorkUpdate, db: sqlite3.Connection = Depends(get_db)):
+def update_work(work_id: str, work_update: WorkUpdate, db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     cursor = db.execute("SELECT * FROM works WHERE id = ?", (work_id,))
     existing = cursor.fetchone()
     if not existing:
@@ -125,13 +126,13 @@ def update_work(work_id: str, work_update: WorkUpdate, db: sqlite3.Connection = 
     return _get_single_work(db, work_id)
 
 @router.post("/{work_id}/exclude")
-def exclude_work(work_id: str, db: sqlite3.Connection = Depends(get_db)):
+def exclude_work(work_id: str, db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     db.execute("UPDATE works SET status = 'excluded' WHERE id = ?", (work_id,))
     db.commit()
     return {"message": "Work marked as excluded successfully"}
 
 @router.post("/merge")
-def merge_works(request: MergeWorksRequest, db: sqlite3.Connection = Depends(get_db)):
+def merge_works(request: MergeWorksRequest, db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     try:
         pid = request.primary_id
         sid = request.secondary_id
@@ -151,7 +152,22 @@ def merge_works(request: MergeWorksRequest, db: sqlite3.Connection = Depends(get
         # Update work_references
         db.execute("UPDATE OR IGNORE work_references SET work_id = ? WHERE work_id = ?", (pid, sid))
         db.execute("DELETE FROM work_references WHERE work_id = ?", (sid,))
-        
+
+        # Update similarity edges (both endpoints)
+        db.execute("UPDATE OR IGNORE similarity_edges SET work_id_a = ? WHERE work_id_a = ?", (pid, sid))
+        db.execute("UPDATE OR IGNORE similarity_edges SET work_id_b = ? WHERE work_id_b = ?", (pid, sid))
+        db.execute("DELETE FROM similarity_edges WHERE work_id_a = ? OR work_id_b = ?", (sid, sid))
+        # A pid—sid edge becomes a self-loop after remapping; drop those
+        db.execute("DELETE FROM similarity_edges WHERE work_id_a = work_id_b")
+
+        # Update cluster assignments
+        db.execute("UPDATE OR IGNORE work_clusters SET work_id = ? WHERE work_id = ?", (pid, sid))
+        db.execute("DELETE FROM work_clusters WHERE work_id = ?", (sid,))
+
+        # Update manuscript details
+        db.execute("UPDATE OR IGNORE manuscript_details SET work_id = ? WHERE work_id = ?", (pid, sid))
+        db.execute("DELETE FROM manuscript_details WHERE work_id = ?", (sid,))
+
         # Soft delete the secondary work
         db.execute("UPDATE works SET status = 'deleted' WHERE id = ?", (sid,))
         

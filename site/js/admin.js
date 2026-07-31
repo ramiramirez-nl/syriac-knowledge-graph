@@ -1,9 +1,35 @@
 const API_BASE = '/api';
 
-function showTab(tabId) {
+// --- Auth helpers ---
+// All admin endpoints require an admin Bearer token. We read it once from
+// localStorage (set by login.html) and attach it to every API call.
+const token = localStorage.getItem('token');
+
+function authHeaders(extra) {
+    return Object.assign({ 'Authorization': 'Bearer ' + token }, extra || {});
+}
+
+// Any DB- or user-supplied string rendered via innerHTML must go through this.
+// OpenAlex titles can contain markup (e.g. <i> tags), so raw interpolation is
+// a stored-XSS vector.
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+function requireAdmin() {
+    if (!token) {
+        window.location.href = '/login.html';
+        return false;
+    }
+    return true;
+}
+
+function showTab(tabId, evt) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    event.target.classList.add('active');
+    evt.target.classList.add('active');
     document.getElementById(tabId).classList.add('active');
 
     if (tabId === 'works') loadWorks();
@@ -21,22 +47,34 @@ async function loadWorks() {
     works.forEach(w => {
         tbody.innerHTML += `
             <tr>
-                <td>${w.id}</td>
-                <td>${w.title}</td>
-                <td>${w.year || ''}</td>
+                <td>${escapeHtml(w.id)}</td>
+                <td>${escapeHtml(w.title)}</td>
+                <td>${escapeHtml(w.year || '')}</td>
                 <td>
-                    <button class="btn btn-primary" onclick='editWork(${JSON.stringify(w)})'>Edit</button>
-                    <button class="btn btn-danger" onclick="deleteWork('${w.id}')">Delete (Hide)</button>
-                    <button class="btn btn-danger" onclick="excludeWork('${w.id}')">Exclude (False Positive)</button>
+                    <button class="btn btn-primary" data-edit-work="${escapeHtml(w.id)}">Edit</button>
+                    <button class="btn btn-danger" data-delete-work="${escapeHtml(w.id)}">Delete (Hide)</button>
+                    <button class="btn btn-danger" data-exclude-work="${escapeHtml(w.id)}">Exclude (False Positive)</button>
                 </td>
             </tr>
         `;
+    });
+    tbody.querySelectorAll('[data-edit-work]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const w = works.find(x => x.id === btn.dataset.editWork);
+            if (w) editWork(w);
+        });
+    });
+    tbody.querySelectorAll('[data-delete-work]').forEach(btn => {
+        btn.addEventListener('click', () => deleteWork(btn.dataset.deleteWork));
+    });
+    tbody.querySelectorAll('[data-exclude-work]').forEach(btn => {
+        btn.addEventListener('click', () => excludeWork(btn.dataset.excludeWork));
     });
 }
 
 async function deleteWork(id) {
     if (!confirm('Are you sure you want to hide this work?')) return;
-    const res = await fetch(`${API_BASE}/works/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/works/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
     if (res.ok) {
         alert('Work deleted');
         if (document.getElementById('works').classList.contains('active')) {
@@ -51,7 +89,7 @@ async function deleteWork(id) {
 
 async function excludeWork(id) {
     if (!confirm('Are you sure you want to mark this work as a false positive? It will be excluded from future imports.')) return;
-    const res = await fetch(`${API_BASE}/works/${id}/exclude`, { method: 'POST' });
+    const res = await fetch(`${API_BASE}/works/${encodeURIComponent(id)}/exclude`, { method: 'POST', headers: authHeaders() });
     if (res.ok) {
         alert('Work excluded');
         if (document.getElementById('works').classList.contains('active')) {
@@ -79,12 +117,12 @@ async function submitNewWork() {
     const yearStr = document.getElementById('newWorkYear').value.trim();
     const doi = document.getElementById('newWorkDoi').value.trim();
     const authorsStr = document.getElementById('newWorkAuthors').value.trim();
-    
+
     const year = yearStr ? parseInt(yearStr) : null;
     const authors = authorsStr ? authorsStr.split(',').map(a => a.trim()).filter(a => a) : [];
-    
+
     const work_type = document.getElementById('newWorkType').value;
-    
+
     const workData = {
         title: title,
         year: year,
@@ -92,7 +130,7 @@ async function submitNewWork() {
         authors: authors,
         work_type: work_type
     };
-    
+
     if (work_type === 'manuscript') {
         workData.manuscript_details = {
             language: document.getElementById('newMsLang').value.trim() || null,
@@ -102,35 +140,35 @@ async function submitNewWork() {
             incipit: document.getElementById('newMsIncipit').value.trim() || null
         };
     }
-    
+
     document.getElementById('addWorkResult').style.color = 'black';
-    document.getElementById('addWorkResult').innerHTML = 'Saving...';
-    
+    document.getElementById('addWorkResult').textContent = 'Saving...';
+
     try {
         const res = await fetch(`${API_BASE}/works`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(workData)
         });
-        
+
         if (res.ok) {
             document.getElementById('addWorkResult').style.color = 'green';
-            document.getElementById('addWorkResult').innerHTML = 'Work added successfully!';
+            document.getElementById('addWorkResult').textContent = 'Work added successfully!';
             // clear form
             document.getElementById('newWorkTitle').value = '';
             document.getElementById('newWorkYear').value = '';
             document.getElementById('newWorkDoi').value = '';
             document.getElementById('newWorkAuthors').value = '';
-            
+
             loadWorks();
         } else {
             const data = await res.json();
             document.getElementById('addWorkResult').style.color = 'red';
-            document.getElementById('addWorkResult').innerHTML = 'Error: ' + (data.detail || JSON.stringify(data));
+            document.getElementById('addWorkResult').textContent = 'Error: ' + (data.detail || JSON.stringify(data));
         }
     } catch (err) {
         document.getElementById('addWorkResult').style.color = 'red';
-        document.getElementById('addWorkResult').innerHTML = 'Network Error: ' + err.message;
+        document.getElementById('addWorkResult').textContent = 'Network Error: ' + err.message;
     }
 }
 
@@ -156,7 +194,7 @@ function editWork(work) {
     document.getElementById('editWorkYear').value = work.year || '';
     document.getElementById('editWorkDoi').value = work.doi || '';
     document.getElementById('editWorkType').value = work.work_type || 'article';
-    
+
     if (work.work_type === 'manuscript' && work.manuscript_details) {
         document.getElementById('editMsLang').value = work.manuscript_details.language || '';
         document.getElementById('editMsDate').value = work.manuscript_details.date_composed || '';
@@ -171,11 +209,11 @@ function editWork(work) {
         document.getElementById('editMsIncipit').value = '';
     }
     toggleManuscriptFields('edit');
-    
+
     document.getElementById('editWorkForm').style.display = 'block';
     document.getElementById('addWorkForm').style.display = 'none';
     document.getElementById('editWorkResult').innerHTML = '';
-    
+
     // Scroll to form
     document.getElementById('editWorkForm').scrollIntoView();
 }
@@ -189,18 +227,18 @@ async function submitEditWork() {
     }
     const yearStr = document.getElementById('editWorkYear').value.trim();
     const doi = document.getElementById('editWorkDoi').value.trim();
-    
+
     const year = yearStr ? parseInt(yearStr) : null;
-    
+
     const work_type = document.getElementById('editWorkType').value;
-    
+
     const workData = {
         title: title,
         year: year,
         doi: doi,
         work_type: work_type
     };
-    
+
     if (work_type === 'manuscript') {
         workData.manuscript_details = {
             language: document.getElementById('editMsLang').value.trim() || null,
@@ -211,29 +249,29 @@ async function submitEditWork() {
         };
     }
 
-    
+
     document.getElementById('editWorkResult').style.color = 'black';
-    document.getElementById('editWorkResult').innerHTML = 'Saving...';
-    
+    document.getElementById('editWorkResult').textContent = 'Saving...';
+
     try {
-        const res = await fetch(`${API_BASE}/works/${id}`, {
+        const res = await fetch(`${API_BASE}/works/${encodeURIComponent(id)}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(workData)
         });
-        
+
         if (res.ok) {
             document.getElementById('editWorkResult').style.color = 'green';
-            document.getElementById('editWorkResult').innerHTML = 'Work updated successfully!';
+            document.getElementById('editWorkResult').textContent = 'Work updated successfully!';
             loadWorks();
         } else {
             const data = await res.json();
             document.getElementById('editWorkResult').style.color = 'red';
-            document.getElementById('editWorkResult').innerHTML = 'Error: ' + (data.detail || JSON.stringify(data));
+            document.getElementById('editWorkResult').textContent = 'Error: ' + (data.detail || JSON.stringify(data));
         }
     } catch (err) {
         document.getElementById('editWorkResult').style.color = 'red';
-        document.getElementById('editWorkResult').innerHTML = 'Network Error: ' + err.message;
+        document.getElementById('editWorkResult').textContent = 'Network Error: ' + err.message;
     }
 }
 
@@ -246,13 +284,19 @@ async function loadAuthors() {
     authors.forEach(a => {
         tbody.innerHTML += `
             <tr>
-                <td>${a.id}</td>
-                <td>${a.name}</td>
+                <td>${escapeHtml(a.id)}</td>
+                <td>${escapeHtml(a.name)}</td>
                 <td>
-                    <button class="btn btn-primary" onclick="promptMerge('${a.id}', '${a.name.replace(/'/g, "\\'")}')">Merge Into...</button>
+                    <button class="btn btn-primary" data-merge-author="${escapeHtml(a.id)}">Merge Into...</button>
                 </td>
             </tr>
         `;
+    });
+    tbody.querySelectorAll('[data-merge-author]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const a = authors.find(x => x.id === btn.dataset.mergeAuthor);
+            if (a) promptMerge(a.id, a.name);
+        });
     });
 }
 
@@ -262,10 +306,10 @@ async function promptMerge(secondaryId, name) {
 
     const res = await fetch(`${API_BASE}/authors/merge`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ primary_id: primaryId, secondary_ids: [secondaryId] })
     });
-    
+
     if (res.ok) {
         alert('Author merged successfully');
         loadAuthors();
@@ -275,29 +319,42 @@ async function promptMerge(secondaryId, name) {
 }
 
 async function loadDuplicates() {
-    document.getElementById('duplicatesResults').innerHTML = 'Loading... (this might take a few seconds)';
-    const res = await fetch(`${API_BASE}/curation/duplicates?limit=20`);
+    document.getElementById('duplicatesResults').textContent = 'Loading... (this might take a few seconds)';
+    const res = await fetch(`${API_BASE}/curation/duplicates?limit=20`, { headers: authHeaders() });
     const dups = await res.json();
     let html = '<table><thead><tr><th>Similarity</th><th>Work 1</th><th>Work 2</th><th>Actions</th></tr></thead><tbody>';
     dups.forEach(d => {
+        const w1 = escapeHtml(d.work1.id), w2 = escapeHtml(d.work2.id);
         html += `
             <tr>
-                <td>${d.similarity}%</td>
-                <td><strong>${d.work1.id}</strong><br>${d.work1.title}</td>
-                <td><strong>${d.work2.id}</strong><br>${d.work2.title}</td>
+                <td>${escapeHtml(d.similarity)}%</td>
+                <td><strong>${w1}</strong><br>${escapeHtml(d.work1.title)}</td>
+                <td><strong>${w2}</strong><br>${escapeHtml(d.work2.title)}</td>
                 <td>
-                    <button class="btn btn-primary" onclick="mergeWorks('${d.work1.id}', '${d.work2.id}')" title="Merge 2 into 1">M 2&rarr;1</button>
-                    <button class="btn btn-primary" onclick="mergeWorks('${d.work2.id}', '${d.work1.id}')" title="Merge 1 into 2">M 1&rarr;2</button>
-                    <button class="btn btn-danger" onclick="deleteWork('${d.work1.id}')">Del 1</button>
-                    <button class="btn btn-danger" onclick="deleteWork('${d.work2.id}')">Del 2</button>
-                    <button class="btn btn-danger" onclick="excludeWork('${d.work1.id}')">Exc 1</button>
-                    <button class="btn btn-danger" onclick="excludeWork('${d.work2.id}')">Exc 2</button>
+                    <button class="btn btn-primary" data-merge-works="${w1}|${w2}" title="Merge 2 into 1">M 2&rarr;1</button>
+                    <button class="btn btn-primary" data-merge-works="${w2}|${w1}" title="Merge 1 into 2">M 1&rarr;2</button>
+                    <button class="btn btn-danger" data-del-work="${w1}">Del 1</button>
+                    <button class="btn btn-danger" data-del-work="${w2}">Del 2</button>
+                    <button class="btn btn-danger" data-exc-work="${w1}">Exc 1</button>
+                    <button class="btn btn-danger" data-exc-work="${w2}">Exc 2</button>
                 </td>
             </tr>
         `;
     });
     html += '</tbody></table>';
     document.getElementById('duplicatesResults').innerHTML = html;
+    document.querySelectorAll('[data-merge-works]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const [p, s] = btn.dataset.mergeWorks.split('|');
+            mergeWorks(p, s);
+        });
+    });
+    document.querySelectorAll('[data-del-work]').forEach(btn => {
+        btn.addEventListener('click', () => deleteWork(btn.dataset.delWork));
+    });
+    document.querySelectorAll('[data-exc-work]').forEach(btn => {
+        btn.addEventListener('click', () => excludeWork(btn.dataset.excWork));
+    });
 }
 
 async function mergeWorks(primaryId, secondaryId) {
@@ -305,10 +362,10 @@ async function mergeWorks(primaryId, secondaryId) {
 
     const res = await fetch(`${API_BASE}/works/merge`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ primary_id: primaryId, secondary_id: secondaryId })
     });
-    
+
     if (res.ok) {
         alert('Works merged successfully');
         loadDuplicates();
@@ -324,93 +381,94 @@ async function uploadBibtex() {
         alert('Please select a file first.');
         return;
     }
-    
+
     const file = fileInput.files[0];
     const formData = new FormData();
     formData.append('file', file);
-    
-    document.getElementById('importResults').innerHTML = 'Uploading and processing...';
-    
+
+    document.getElementById('importResults').textContent = 'Uploading and processing...';
+
     try {
         const res = await fetch(`${API_BASE}/import/bibtex`, {
             method: 'POST',
+            headers: authHeaders(),
             body: formData
         });
-        
+
         const data = await res.json();
         if (res.ok) {
             document.getElementById('importResults').innerHTML = `
                 <div style="color: green; font-weight: bold; margin-bottom: 10px;">Import Successful!</div>
                 <ul style="line-height: 1.6;">
-                    <li><strong>Total records found:</strong> ${data.total_processed}</li>
-                    <li><strong>Successfully added:</strong> ${data.added}</li>
-                    <li><strong>Skipped:</strong> ${data.skipped} (Duplicates or missing titles)</li>
+                    <li><strong>Total records found:</strong> ${escapeHtml(data.total_processed)}</li>
+                    <li><strong>Successfully added:</strong> ${escapeHtml(data.added)}</li>
+                    <li><strong>Skipped:</strong> ${escapeHtml(data.skipped)} (Duplicates or missing titles)</li>
                 </ul>
             `;
             fileInput.value = '';
         } else {
-            document.getElementById('importResults').innerHTML = `<div style="color: red;">Error: ${data.detail || JSON.stringify(data)}</div>`;
+            document.getElementById('importResults').innerHTML = `<div style="color: red;">Error: ${escapeHtml(data.detail || JSON.stringify(data))}</div>`;
         }
     } catch (err) {
-        document.getElementById('importResults').innerHTML = `<div style="color: red;">Network error: ${err.message}</div>`;
+        document.getElementById('importResults').innerHTML = `<div style="color: red;">Network error: ${escapeHtml(err.message)}</div>`;
     }
 }
 
 async function loadQueue() {
-    document.getElementById('queueResults').innerHTML = 'Loading...';
-    const token = localStorage.getItem('token');
-    if (!token) {
-        document.getElementById('queueResults').innerHTML = '<div style="color:red;">Error: Not logged in as admin. Please login.</div>';
-        return;
-    }
+    document.getElementById('queueResults').textContent = 'Loading...';
 
     try {
         const res = await fetch(`${API_BASE}/contributions?status=pending`, {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: authHeaders()
         });
-        
+
         if (res.ok) {
             const queue = await res.json();
             if (queue.length === 0) {
-                document.getElementById('queueResults').innerHTML = 'Queue is empty.';
+                document.getElementById('queueResults').textContent = 'Queue is empty.';
                 return;
             }
-            
+
             let html = '<table><thead><tr><th>ID</th><th>User ID</th><th>Type</th><th>Payload</th><th>Actions</th></tr></thead><tbody>';
             queue.forEach(c => {
                 html += `
                     <tr>
-                        <td>${c.id}</td>
-                        <td>${c.user_id}</td>
-                        <td>${c.type}</td>
-                        <td><pre style="max-width:300px; overflow:auto; font-size:12px;">${c.payload}</pre></td>
+                        <td>${escapeHtml(c.id)}</td>
+                        <td>${escapeHtml(c.user_id)}</td>
+                        <td>${escapeHtml(c.type)}</td>
+                        <td><pre style="max-width:300px; overflow:auto; font-size:12px;">${escapeHtml(c.payload)}</pre></td>
                         <td>
-                            <button class="btn btn-primary" onclick="processContribution(${c.id}, 'approve')">Approve</button>
-                            <button class="btn btn-danger" onclick="processContribution(${c.id}, 'reject')">Reject</button>
+                            <button class="btn btn-primary" data-contrib="${escapeHtml(c.id)}|approve">Approve</button>
+                            <button class="btn btn-danger" data-contrib="${escapeHtml(c.id)}|reject">Reject</button>
                         </td>
                     </tr>
                 `;
             });
             html += '</tbody></table>';
             document.getElementById('queueResults').innerHTML = html;
+            document.querySelectorAll('[data-contrib]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const [id, action] = btn.dataset.contrib.split('|');
+                    processContribution(id, action);
+                });
+            });
         } else {
             document.getElementById('queueResults').innerHTML = '<div style="color:red;">Error loading queue. Admin privileges required.</div>';
         }
     } catch (err) {
-        document.getElementById('queueResults').innerHTML = `<div style="color:red;">Network error: ${err.message}</div>`;
+        document.getElementById('queueResults').innerHTML = `<div style="color:red;">Network error: ${escapeHtml(err.message)}</div>`;
     }
 }
 
 async function processContribution(id, action) {
     if (!confirm(`Are you sure you want to ${action} this contribution?`)) return;
-    
-    const token = localStorage.getItem('token');
+
     try {
-        const res = await fetch(`${API_BASE}/contributions/${id}/${action}`, {
+        const res = await fetch(`${API_BASE}/contributions/${encodeURIComponent(id)}/${encodeURIComponent(action)}`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: authHeaders()
         });
-        
+
         if (res.ok) {
             alert(`Contribution ${action}d successfully`);
             loadQueue();
@@ -423,5 +481,7 @@ async function processContribution(id, action) {
     }
 }
 
-// Initial load
-document.addEventListener('DOMContentLoaded', loadWorks);
+// Initial load — gate behind login first.
+document.addEventListener('DOMContentLoaded', () => {
+    if (requireAdmin()) loadWorks();
+});

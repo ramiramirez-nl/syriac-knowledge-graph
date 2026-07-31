@@ -4,11 +4,12 @@ import uuid
 import bibtexparser
 
 from api.database import get_db
+from api.auth import get_current_admin
 
 router = APIRouter()
 
 @router.post("/bibtex")
-async def import_bibtex(file: UploadFile = File(...), db: sqlite3.Connection = Depends(get_db)):
+async def import_bibtex(file: UploadFile = File(...), db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     if not file.filename.endswith('.bib'):
         raise HTTPException(status_code=400, detail="Only .bib files are supported")
         

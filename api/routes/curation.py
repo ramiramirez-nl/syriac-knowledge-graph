@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from thefuzz import fuzz
 
 from api.database import get_db
+from api.auth import get_current_admin
 
 router = APIRouter()
 
@@ -17,7 +18,7 @@ def get_block_key(title: str) -> str:
     return t[:4]
 
 @router.get("/duplicates")
-def get_potential_duplicates(limit: int = 50, db: sqlite3.Connection = Depends(get_db)):
+def get_potential_duplicates(limit: int = 50, db: sqlite3.Connection = Depends(get_db), admin: dict = Depends(get_current_admin)):
     cursor = db.execute("SELECT id, title, year FROM works WHERE status NOT IN ('deleted', 'excluded')")
     works = [dict(r) for r in cursor.fetchall()]
     

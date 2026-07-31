@@ -151,9 +151,10 @@
     <p style="font-size:12px; color:var(--text-dim); line-height:1.5;">
       Nodes are publications matching a Syriac Studies search term set (data: OpenAlex).
       "Similarity &amp; clusters" combines citation links, shared-reference (bibliographic
-      coupling) and co-citation signals, and title-text similarity into one weighted graph,
-      clustered with the Leiden algorithm. Node size reflects OpenAlex-wide citation count.
-      Early prototype — most cross-references (books, non-English works) are still missing.
+      coupling) and co-citation signals, and semantic similarity from multilingual-e5
+      embeddings into one weighted graph, clustered with the Leiden algorithm. Node size
+      reflects OpenAlex-wide citation count. Most cross-references (books, non-English
+      works) are still missing.
     </p>
   </div>
 
@@ -700,13 +701,6 @@
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
-
-  // Dev/QA hook only — lets us drive node selection from automated checks.
-  window.__debug = {
-    graph, renderer, data, selectWork, highlightNode, highlightSet, focusCamera, focusOnNodes,
-    showAuthorWorks, showCollaborationCandidate, focusCluster, authorsById, worksById,
-    getViewMode: () => viewMode,
-  };
 })();
 </script>
 </body>

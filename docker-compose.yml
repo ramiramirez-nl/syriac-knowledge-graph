@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # REQUIRED: set a stable secret so login tokens survive restarts
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in your environment or a .env file}
+      - PORT=8080
+    volumes:
+      # Persist the SQLite database outside the container
+      - syriac_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  syriac_data:

@@ -5,15 +5,9 @@ import uuid
 
 from api.database import get_db
 from api.models import ContributionCreate, Contribution
-from api.auth import get_current_user
+from api.auth import get_current_user, get_current_admin
 
 router = APIRouter()
-
-def get_current_admin(current_user: dict = Depends(get_current_user), db: sqlite3.Connection = Depends(get_db)):
-    user = db.execute("SELECT role FROM users WHERE id = ?", (current_user["user_id"],)).fetchone()
-    if not user or user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    return current_user
 
 @router.post("", response_model=dict)
 def submit_contribution(contrib: ContributionCreate, current_user: dict = Depends(get_current_user), db: sqlite3.Connection = Depends(get_db)):

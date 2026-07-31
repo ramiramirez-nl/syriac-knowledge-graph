@@ -31,7 +31,12 @@ def main() -> None:
     conn.row_factory = sqlite3.Row
 
     works = {}
-    for row in conn.execute("SELECT id, title, year, venue, work_type, cited_by_count, source, status FROM works"):
+    # Soft-deleted and excluded works are curation artifacts — they must not
+    # leak into the public site export.
+    for row in conn.execute(
+        "SELECT id, title, year, venue, work_type, cited_by_count, source, status FROM works "
+        "WHERE status NOT IN ('deleted', 'excluded')"
+    ):
         works[row["id"]] = {
             "id": row["id"],
             "title": row["title"],
@@ -64,6 +69,7 @@ def main() -> None:
     citations = [
         {"source": row["citing_work_id"], "target": row["cited_work_id"]}
         for row in conn.execute("SELECT citing_work_id, cited_work_id FROM citations")
+        if row["citing_work_id"] in works and row["cited_work_id"] in works
     ]
 
     # Drop authors with zero attributed works (shouldn't happen, but guard).
@@ -83,6 +89,7 @@ def main() -> None:
         for row in conn.execute(
             "SELECT work_id_a, work_id_b, weight, has_citation, coupling, cocitation, embedding FROM similarity_edges"
         )
+        if row["work_id_a"] in works and row["work_id_b"] in works
     ]
 
     for row in conn.execute("SELECT work_id, cluster_id FROM work_clusters"):

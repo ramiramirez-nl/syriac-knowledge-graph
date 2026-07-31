@@ -28,11 +28,13 @@ class WorkCreate(BaseModel):
     venue: Optional[str] = None
     work_type: Optional[str] = None
     authors: Optional[List[str]] = []  # List of author names or IDs
+    manuscript_details: Optional[ManuscriptDetails] = None
 
 class WorkUpdate(BaseModel):
     title: Optional[str] = None
     doi: Optional[str] = None
     year: Optional[int] = None
+    work_type: Optional[str] = None
     manuscript_details: Optional[ManuscriptDetails] = None
 
 class Author(BaseModel):

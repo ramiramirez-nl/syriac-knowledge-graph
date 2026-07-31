@@ -67,6 +67,15 @@
             window.location.href = '/login.html';
         }
 
+        // User- and DB-supplied strings (bio, interests, names, notification
+        // messages) are rendered via innerHTML below — escape them to prevent
+        // stored XSS.
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
         async function loadProfile() {
             try {
                 const res = await fetch('/api/users/me', {
@@ -92,24 +101,25 @@
                     div.style.marginBottom = '15px';
                     div.style.borderRadius = '5px';
                     
+                    const safeAuthorId = escapeHtml(c.author_id);
                     div.innerHTML = `
                         <div style="display:flex; justify-content: space-between;">
-                            <strong>${c.name} (${c.author_id})</strong>
-                            <span style="color: ${c.status === 'approved' ? 'green' : 'orange'}">${c.status}</span>
+                            <strong>${escapeHtml(c.name)} (${safeAuthorId})</strong>
+                            <span style="color: ${c.status === 'approved' ? 'green' : 'orange'}">${escapeHtml(c.status)}</span>
                         </div>
-                        <p><strong>Bio:</strong> <span id="bio-text-${c.author_id}">${c.bio || 'Not provided'}</span></p>
-                        <p><strong>Interests:</strong> <span id="interests-text-${c.author_id}">${c.interests || 'Not provided'}</span></p>
-                        ${c.status === 'approved' ? `<button onclick="toggleEdit('${c.author_id}')">Edit Profile</button>` : ''}
-                        
-                        <div id="edit-form-${c.author_id}" class="edit-form">
+                        <p><strong>Bio:</strong> <span id="bio-text-${safeAuthorId}">${escapeHtml(c.bio || 'Not provided')}</span></p>
+                        <p><strong>Interests:</strong> <span id="interests-text-${safeAuthorId}">${escapeHtml(c.interests || 'Not provided')}</span></p>
+                        ${c.status === 'approved' ? `<button onclick="toggleEdit('${safeAuthorId}')">Edit Profile</button>` : ''}
+
+                        <div id="edit-form-${safeAuthorId}" class="edit-form">
                             <h4>Edit Profile</h4>
                             <label>Biography:</label><br>
-                            <textarea id="bio-input-${c.author_id}">${c.bio || ''}</textarea><br>
+                            <textarea id="bio-input-${safeAuthorId}">${escapeHtml(c.bio || '')}</textarea><br>
                             <label>Interests:</label><br>
-                            <textarea id="interests-input-${c.author_id}">${c.interests || ''}</textarea><br>
-                            <button onclick="submitEdit('${c.author_id}')">Save Changes</button>
-                            <button onclick="toggleEdit('${c.author_id}')" style="background:#ccc; color:black;">Cancel</button>
-                            <span id="edit-result-${c.author_id}" style="margin-left: 10px;"></span>
+                            <textarea id="interests-input-${safeAuthorId}">${escapeHtml(c.interests || '')}</textarea><br>
+                            <button onclick="submitEdit('${safeAuthorId}')">Save Changes</button>
+                            <button onclick="toggleEdit('${safeAuthorId}')" style="background:#ccc; color:black;">Cancel</button>
+                            <span id="edit-result-${safeAuthorId}" style="margin-left: 10px;"></span>
                         </div>
                     `;
                     list.appendChild(div);
@@ -176,7 +186,7 @@
                 notifs.forEach(n => {
                     html += `
                         <div style="padding: 10px; border-bottom: 1px solid #ccc; background: ${n.is_read ? 'transparent' : '#fff3cd'};">
-                            ${n.message}
+                            ${escapeHtml(n.message)}
                             ${!n.is_read ? `<button style="font-size: 10px; padding: 2px 5px; margin-left: 10px;" onclick="markRead(${n.id})">Mark as Read</button>` : ''}
                         </div>
                     `;
