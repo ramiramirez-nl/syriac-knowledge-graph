@@ -271,24 +271,14 @@
     }
     
     const rank = clusterRanks.get(clusterId);
-    if (rank === undefined) return "#b8bdc7";
     
-    // Micro-clusters become a neutral pale color to reduce visual noise
-    const cInfo = clustersById.get(clusterId);
-    if (cInfo && cInfo.size <= 2) return "#d1d5db";
+    // Only the top 20 largest clusters get a distinct color.
+    // The rest fall back to a neutral pale gray to reduce visual noise.
+    if (rank === undefined || rank >= 20) return "#d1d5db";
 
     if (!clusterColorCache.has(clusterId)) {
       const paletteIdx = rank % baseHues.length;
-      const cycle = Math.floor(rank / baseHues.length);
-      
       let [h, s, l] = baseHues[paletteIdx];
-      // Vary lightness based on cycle: 0=base, 1=darker, 2=lighter, 3=even darker...
-      if (cycle % 2 === 1) {
-        l = Math.max(20, l - 12 * Math.ceil(cycle / 2));
-      } else if (cycle > 0) {
-        l = Math.min(85, l + 12 * Math.floor(cycle / 2));
-      }
-      
       clusterColorCache.set(clusterId, hslToHex(h, s, l));
     }
     return clusterColorCache.get(clusterId);
