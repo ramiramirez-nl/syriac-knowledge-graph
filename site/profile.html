@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Profile - Syriac Studies Knowledge Graph</title>
+    <style>
+        body { font-family: sans-serif; background: #f4f5f7; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; }
+        .claim-box { background: #eef1f6; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        input[type="text"] { width: 300px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 8px 15px; background: #2f6fd1; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #1a4f9e; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #ccc; }
+        .nav a { color: #2f6fd1; text-decoration: none; }
+        .edit-form { background: #fafafa; padding: 15px; border: 1px solid #ccc; margin-top: 10px; border-radius: 4px; display: none; }
+        .edit-form textarea { width: 100%; height: 80px; margin-bottom: 10px; padding: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="/">&larr; Back to App</a>
+            <a href="#" onclick="logout()">Logout</a>
+        </div>
+        
+        <h2>My Profile</h2>
+        <p>Email: <span id="userEmail">Loading...</span></p>
+
+        <div class="claim-box">
+            <h3>Notifications</h3>
+            <div id="notificationsList" style="font-size: 14px; max-height: 200px; overflow-y: auto;">
+                Loading...
+            </div>
+        </div>
+        
+        <div class="claim-box">
+            <h3>Claim Author Profile</h3>
+            <p>If you are an author in the system, enter your Author ID below to claim it.</p>
+            <input type="text" id="authorIdToClaim" placeholder="Author ID (e.g. A123456789)">
+            <button onclick="claimAuthor()">Claim</button>
+            <div id="claimResult" style="margin-top: 10px; font-size: 14px;"></div>
+        </div>
+
+        <div class="claim-box">
+            <h3>Suggest Missing Work</h3>
+            <p>Help improve the knowledge graph by submitting a missing work to the moderation queue.</p>
+            <input type="text" id="contribTitle" placeholder="Title" style="margin-bottom: 5px;"><br>
+            <input type="text" id="contribYear" placeholder="Year" style="margin-bottom: 5px; width: 100px;"><br>
+            <input type="text" id="contribDoi" placeholder="DOI" style="margin-bottom: 5px;"><br>
+            <input type="text" id="contribAuthors" placeholder="Authors (comma separated)" style="margin-bottom: 10px;"><br>
+            <button onclick="submitContribution()">Submit to Queue</button>
+            <div id="contribResult" style="margin-top: 10px; font-size: 14px;"></div>
+        </div>
+        
+        <h3>My Claimed Profiles</h3>
+        <div id="claimsList">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+
+        async function loadProfile() {
+            try {
+                const res = await fetch('/api/users/me', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error('Unauthorized');
+                const data = await res.json();
+                document.getElementById('userEmail').innerText = data.user.email;
+                
+                loadNotifications();
+                
+                const list = document.getElementById('claimsList');
+                list.innerHTML = '';
+                
+                if (data.claims.length === 0) {
+                    list.innerHTML = '<p>No claims yet.</p>';
+                }
+
+                data.claims.forEach(c => {
+                    const div = document.createElement('div');
+                    div.style.border = '1px solid #ccc';
+                    div.style.padding = '15px';
+                    div.style.marginBottom = '15px';
+                    div.style.borderRadius = '5px';
+                    
+                    div.innerHTML = `
+                        <div style="display:flex; justify-content: space-between;">
+                            <strong>${c.name} (${c.author_id})</strong>
+                            <span style="color: ${c.status === 'approved' ? 'green' : 'orange'}">${c.status}</span>
+                        </div>
+                        <p><strong>Bio:</strong> <span id="bio-text-${c.author_id}">${c.bio || 'Not provided'}</span></p>
+                        <p><strong>Interests:</strong> <span id="interests-text-${c.author_id}">${c.interests || 'Not provided'}</span></p>
+                        ${c.status === 'approved' ? `<button onclick="toggleEdit('${c.author_id}')">Edit Profile</button>` : ''}
+                        
+                        <div id="edit-form-${c.author_id}" class="edit-form">
+                            <h4>Edit Profile</h4>
+                            <label>Biography:</label><br>
+                            <textarea id="bio-input-${c.author_id}">${c.bio || ''}</textarea><br>
+                            <label>Interests:</label><br>
+                            <textarea id="interests-input-${c.author_id}">${c.interests || ''}</textarea><br>
+                            <button onclick="submitEdit('${c.author_id}')">Save Changes</button>
+                            <button onclick="toggleEdit('${c.author_id}')" style="background:#ccc; color:black;">Cancel</button>
+                            <span id="edit-result-${c.author_id}" style="margin-left: 10px;"></span>
+                        </div>
+                    `;
+                    list.appendChild(div);
+                });
+            } catch (err) {
+                console.error(err);
+                logout();
+            }
+        }
+        
+        function toggleEdit(authorId) {
+            const form = document.getElementById(`edit-form-${authorId}`);
+            form.style.display = form.style.display === 'none' || form.style.display === '' ? 'block' : 'none';
+        }
+        
+        async function submitEdit(authorId) {
+            const bio = document.getElementById(`bio-input-${authorId}`).value.trim();
+            const interests = document.getElementById(`interests-input-${authorId}`).value.trim();
+            const resEl = document.getElementById(`edit-result-${authorId}`);
+            
+            resEl.innerText = "Saving...";
+            resEl.style.color = "black";
+            
+            try {
+                const res = await fetch(`/api/authors/${authorId}`, {
+                    method: 'PUT',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ bio: bio, interests: interests })
+                });
+                
+                if (res.ok) {
+                    resEl.innerText = "Saved successfully!";
+                    resEl.style.color = "green";
+                    setTimeout(loadProfile, 1000);
+                } else {
+                    const data = await res.json();
+                    resEl.innerText = "Error: " + (data.detail || "Unknown error");
+                    resEl.style.color = "red";
+                }
+            } catch (err) {
+                resEl.innerText = "Network error";
+                resEl.style.color = "red";
+            }
+        }
+        
+        async function loadNotifications() {
+            try {
+                const res = await fetch('/api/notifications', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) return;
+                const notifs = await res.json();
+                
+                const list = document.getElementById('notificationsList');
+                if (notifs.length === 0) {
+                    list.innerHTML = '<p>No notifications.</p>';
+                    return;
+                }
+                
+                let html = '';
+                notifs.forEach(n => {
+                    html += `
+                        <div style="padding: 10px; border-bottom: 1px solid #ccc; background: ${n.is_read ? 'transparent' : '#fff3cd'};">
+                            ${n.message}
+                            ${!n.is_read ? `<button style="font-size: 10px; padding: 2px 5px; margin-left: 10px;" onclick="markRead(${n.id})">Mark as Read</button>` : ''}
+                        </div>
+                    `;
+                });
+                list.innerHTML = html;
+            } catch (err) {
+                console.error(err);
+            }
+        }
+        
+        async function markRead(id) {
+            try {
+                await fetch(`/api/notifications/${id}/read`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                loadNotifications();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function claimAuthor() {
+            const aid = document.getElementById('authorIdToClaim').value.trim();
+            if (!aid) return;
+            
+            try {
+                const res = await fetch('/api/users/claim', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ author_id: aid })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    document.getElementById('claimResult').style.color = 'green';
+                    document.getElementById('claimResult').innerText = data.message;
+                    loadProfile();
+                } else {
+                    document.getElementById('claimResult').style.color = 'red';
+                    document.getElementById('claimResult').innerText = data.detail || data.message;
+                }
+            } catch (err) {
+                document.getElementById('claimResult').style.color = 'red';
+                document.getElementById('claimResult').innerText = 'Network error.';
+            }
+        }
+
+        async function submitContribution() {
+            const title = document.getElementById('contribTitle').value.trim();
+            if (!title) return alert("Title is required");
+            
+            const payload = {
+                title: title,
+                year: document.getElementById('contribYear').value.trim() || null,
+                doi: document.getElementById('contribDoi').value.trim(),
+                authors: document.getElementById('contribAuthors').value.trim().split(',').map(a => a.trim()).filter(a => a)
+            };
+            
+            try {
+                const res = await fetch('/api/contributions', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ type: 'new_work', payload: JSON.stringify(payload) })
+                });
+                
+                const data = await res.json();
+                if (res.ok) {
+                    document.getElementById('contribResult').style.color = 'green';
+                    document.getElementById('contribResult').innerText = data.message;
+                    document.getElementById('contribTitle').value = '';
+                    document.getElementById('contribYear').value = '';
+                    document.getElementById('contribDoi').value = '';
+                    document.getElementById('contribAuthors').value = '';
+                } else {
+                    document.getElementById('contribResult').style.color = 'red';
+                    document.getElementById('contribResult').innerText = data.detail || data.message;
+                }
+            } catch (err) {
+                document.getElementById('contribResult').style.color = 'red';
+                document.getElementById('contribResult').innerText = 'Network error.';
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/login.html';
+        }
+
+        document.addEventListener('DOMContentLoaded', loadProfile);
+    </script>
+</body>
+</html>

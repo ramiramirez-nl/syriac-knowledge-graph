@@ -19,6 +19,8 @@ from urllib.parse import quote
 
 import requests
 import yaml
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT / "config" / "terms.yaml"
@@ -49,11 +51,33 @@ def short_id(openalex_url: str) -> str:
     return openalex_url.rsplit("/", 1)[-1]
 
 
-def fetch_term(session: requests.Session, base_url: str, mailto: str, per_page: int, term: str) -> list[dict]:
+def is_excluded(work: dict, exclude_terms: list[str]) -> bool:
+    """Return True when a configured exclusion occurs in the work title."""
+    title = (work.get("display_name") or "").casefold()
+    return any(term.casefold() in title for term in exclude_terms)
+
+
+def build_session() -> requests.Session:
+    """Create an API session resilient to transient rate limits and failures."""
+    retry = Retry(
+        total=5,
+        backoff_factor=1.0,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET",),
+        respect_retry_after_header=True,
+    )
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
+
+
+def fetch_term(session: requests.Session, base_url: str, mailto: str, per_page: int, term: str, from_date: str = None) -> list[dict]:
     """Page through all works whose title matches `term`."""
     results: list[dict] = []
     cursor = "*"
     filter_value = quote(f'title.search:"{term}"' if " " in term else f"title.search:{term}")
+    if from_date:
+        filter_value += f",from_updated_date:{from_date}"
     while cursor:
         url = (
             f"{base_url}/works?filter={filter_value}"
@@ -118,11 +142,31 @@ def build_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_authorship_author ON authorship(author_id);
         CREATE INDEX IF NOT EXISTS idx_citations_cited ON citations(cited_work_id);
         CREATE INDEX IF NOT EXISTS idx_workrefs_ref ON work_references(referenced_work_id);
+
+        CREATE TABLE IF NOT EXISTS sync_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            hashed_password TEXT,
+            role TEXT DEFAULT 'user'
+        );
+
+        CREATE TABLE IF NOT EXISTS user_claims (
+            user_id INTEGER REFERENCES users(id),
+            author_id TEXT REFERENCES authors(id),
+            status TEXT DEFAULT 'pending',
+            PRIMARY KEY(user_id, author_id)
+        );
         """
     )
 
 
 def upsert_work(conn: sqlite3.Connection, work: dict) -> None:
+    work_id = short_id(work["id"])
     venue = None
     primary_location = work.get("primary_location") or {}
     source = primary_location.get("source") or {}
@@ -138,7 +182,7 @@ def upsert_work(conn: sqlite3.Connection, work: dict) -> None:
             cited_by_count=excluded.cited_by_count
         """,
         (
-            short_id(work["id"]),
+            work_id,
             work.get("doi"),
             work.get("display_name"),
             work.get("publication_year"),
@@ -147,6 +191,10 @@ def upsert_work(conn: sqlite3.Connection, work: dict) -> None:
             work.get("cited_by_count", 0),
         ),
     )
+
+    # The API is authoritative for OpenAlex authorship. Clear old links first
+    # so removed/corrected authors do not survive an incremental refresh.
+    conn.execute("DELETE FROM authorship WHERE work_id = ?", (work_id,))
 
     for authorship in work.get("authorships", []):
         author = authorship.get("author") or {}
@@ -167,18 +215,23 @@ def upsert_work(conn: sqlite3.Connection, work: dict) -> None:
             INSERT OR IGNORE INTO authorship (work_id, author_id, author_position)
             VALUES (?, ?, ?)
             """,
-            (short_id(work["id"]), author_id, authorship.get("author_position")),
+            (work_id, author_id, authorship.get("author_position")),
         )
 
 
 def link_citations(conn: sqlite3.Connection, works: list[dict]) -> None:
-    """Store the full reference list per work (work_references), plus a filtered
-    internal-only subset (citations) for edges where both endpoints are in the corpus."""
+    """Refresh full references and internal-only citations for fetched works."""
     known_ids = {row[0] for row in conn.execute("SELECT id FROM works")}
+    fetched_ids = [short_id(work["id"]) for work in works]
+    conn.executemany("DELETE FROM work_references WHERE work_id = ?", ((wid,) for wid in fetched_ids))
+    conn.executemany("DELETE FROM citations WHERE citing_work_id = ?", ((wid,) for wid in fetched_ids))
+
     for work in works:
         citing_id = short_id(work["id"])
         for ref in work.get("referenced_works", []):
             cited_id = short_id(ref)
+            if cited_id == citing_id:
+                continue
             conn.execute(
                 "INSERT OR IGNORE INTO work_references (work_id, referenced_work_id) VALUES (?, ?)",
                 (citing_id, cited_id),
@@ -194,32 +247,50 @@ def main() -> None:
     cfg = load_config()
     api_cfg = cfg["api"]
     terms = cfg["include_terms"]
+    exclude_terms = cfg.get("exclude_terms") or []
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     build_schema(conn)
 
-    session = requests.Session()
+    last_updated_row = conn.execute("SELECT value FROM sync_meta WHERE key = 'last_updated'").fetchone()
+    from_date = last_updated_row[0] if last_updated_row else None
+    if from_date:
+        print(f"Incremental update: fetching works updated since {from_date}")
+    
+    today_str = time.strftime("%Y-%m-%d")
+
+    session = build_session()
     seen_ids: set[str] = set()
     all_works: list[dict] = []
 
     for term in terms:
         print(f"Fetching term: {term!r} ...")
-        works = fetch_term(session, api_cfg["base_url"], api_cfg["mailto"], api_cfg["per_page"], term)
+        works = fetch_term(session, api_cfg["base_url"], api_cfg["mailto"], api_cfg["per_page"], term, from_date)
         new_count = 0
+        excluded_count = 0
         for w in works:
             wid = short_id(w["id"])
             if wid in seen_ids:
+                continue
+            if is_excluded(w, exclude_terms):
+                excluded_count += 1
                 continue
             seen_ids.add(wid)
             all_works.append(w)
             upsert_work(conn, w)
             new_count += 1
         conn.commit()
-        print(f"  -> {len(works)} results, {new_count} new (total so far: {len(seen_ids)})")
+        print(
+            f"  -> {len(works)} results, {new_count} new, {excluded_count} excluded "
+            f"(total so far: {len(seen_ids)})"
+        )
 
     print("Linking internal citation edges...")
     link_citations(conn, all_works)
+    conn.execute("DELETE FROM authors WHERE id NOT IN (SELECT DISTINCT author_id FROM authorship)")
+    
+    conn.execute("INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_updated', ?)", (today_str,))
     conn.commit()
 
     n_works = conn.execute("SELECT COUNT(*) FROM works").fetchone()[0]

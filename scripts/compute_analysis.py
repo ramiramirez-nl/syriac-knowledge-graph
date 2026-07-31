@@ -30,6 +30,7 @@ from pathlib import Path
 import igraph as ig
 import leidenalg
 import numpy as np
+from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -42,21 +43,13 @@ DB_PATH = ROOT / "data" / "syriac.db"
 MAX_REFERENCE_FANOUT = 30
 
 # Signal weights for the combined similarity graph.
-WEIGHTS = {"citation": 0.35, "coupling": 0.30, "cocitation": 0.20, "tfidf": 0.15}
+WEIGHTS = {"citation": 0.35, "coupling": 0.30, "cocitation": 0.20, "embedding": 0.15}
 
 TOP_K_NEIGHBORS = 6  # keep at most this many strongest edges per work
 MIN_EDGE_WEIGHT = 0.05
 
 AUTHOR_MIN_WORKS = 1
-AUTHOR_SIM_THRESHOLD = 0.35
-# Near-perfect similarity (>0.97) between two DIFFERENT authors' title-derived
-# centroids is, in practice, almost always a short-title TF-IDF artifact
-# (e.g. "The Church of the East" vs "Crosses of the Church of the East")
-# rather than genuine independent convergence on identical phrasing. Title-only
-# TF-IDF is a coarse v1 proxy — see PLAN.md Faz 1 limitations — a future pass
-# with real semantic embeddings (e.g. multilingual-e5) should replace this
-# ceiling with an actual precision fix.
-AUTHOR_SIM_CEILING = 0.97
+AUTHOR_SIM_THRESHOLD = 0.86
 TOP_COLLABORATION_CANDIDATES = 300
 
 
@@ -152,59 +145,49 @@ def normalize_counter(counter: Counter) -> dict:
     return {k: v / max_val for k, v in counter.items()}
 
 
-def compute_tfidf_similarity(works: dict[str, str], work_types: dict[str, str]):
-    """Returns (work_ids list, tfidf matrix, top-k similarity dict {(a,b): score})."""
+def compute_embedding_similarity(works: dict[str, str], work_types: dict[str, str]):
+    """Returns (work_ids list, dense matrix, top-k similarity dict {(a,b): score}, tfidf_vectorizer, tfidf_matrix)."""
     work_ids = list(works.keys())
     titles = [works[wid] or "" for wid in work_ids]
 
-    vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=2, max_df=0.5)
-    matrix = vectorizer.fit_transform(titles)
-
-    # Titles with fewer than 3 distinctive (non-stopword) terms — e.g. short
-    # book-review headers like "Syriac", or generic phrases like "The Church
-    # of the East" — produce meaningless perfect-similarity matches against
-    # any other short title sharing those same 1-2 words (a 2-term vector's
-    # direction is fully determined by those terms, so cosine saturates at
-    # 1.0 far too easily). Zero out their rows so they can't drive TF-IDF
-    # signals (they can still connect via citation/coupling edges).
-    nnz_per_row = np.diff(matrix.tocsr().indptr)
-    thin_title_mask = nnz_per_row < 3
+    model = SentenceTransformer('intfloat/multilingual-e5-small')
+    # E5 models expect a prefix for clustering/similarity tasks
+    e5_titles = ["query: " + t for t in titles]
+    matrix = model.encode(e5_titles, normalize_embeddings=True)
 
     review_mask = np.array([is_review_like(works[wid], work_types.get(wid)) for wid in work_ids])
-
-    exclude_mask = thin_title_mask | review_mask
-    if exclude_mask.any():
-        matrix = matrix.tolil()
-        matrix[exclude_mask, :] = 0
-        matrix = matrix.tocsr()
-        print(
-            f"  ({thin_title_mask.sum()} works have too-generic titles, "
-            f"{review_mask.sum()} look like book reviews; both excluded from TF-IDF signal)"
-        )
+    if review_mask.any():
+        matrix[review_mask, :] = 0
+        print(f"  ({review_mask.sum()} look like book reviews; excluded from embedding signal)")
 
     sim_edges: dict[tuple, float] = {}
-    # Process in chunks to bound memory for the dense similarity block.
     chunk_size = 500
     n = len(work_ids)
     for start in range(0, n, chunk_size):
         end = min(start + chunk_size, n)
-        block = cosine_similarity(matrix[start:end], matrix)
+        block = np.dot(matrix[start:end], matrix.T)
         for local_i, global_i in enumerate(range(start, end)):
             row = block[local_i]
             row[global_i] = 0  # exclude self
             top_idx = np.argpartition(-row, min(TOP_K_NEIGHBORS, n - 1) - 1)[:TOP_K_NEIGHBORS]
             for j in top_idx:
                 score = float(row[j])
-                if score < 0.12:
+                # Embeddings generally have higher baseline cosine similarity scores
+                if score < 0.82:
                     continue
                 a, b = work_ids[global_i], work_ids[j]
                 key = (a, b) if a < b else (b, a)
                 if key not in sim_edges or sim_edges[key] < score:
                     sim_edges[key] = score
-    return work_ids, matrix, sim_edges, vectorizer
+                    
+    # Compute TF-IDF matrix for labeling clusters later
+    vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=2, max_df=0.5)
+    tfidf_matrix = vectorizer.fit_transform(titles)
+                    
+    return work_ids, matrix, sim_edges, vectorizer, tfidf_matrix
 
 
-def build_combined_graph(work_ids: list[str], citation_pairs: set, coupling: dict, cocitation: dict, tfidf_edges: dict):
+def build_combined_graph(work_ids: list[str], citation_pairs: set, coupling: dict, cocitation: dict, embedding_edges: dict):
     edge_weights: dict[tuple, dict] = defaultdict(dict)
 
     for a, b in citation_pairs:
@@ -214,8 +197,8 @@ def build_combined_graph(work_ids: list[str], citation_pairs: set, coupling: dic
         edge_weights[(a, b)]["coupling"] = v
     for (a, b), v in cocitation.items():
         edge_weights[(a, b)]["cocitation"] = v
-    for (a, b), v in tfidf_edges.items():
-        edge_weights[(a, b)]["tfidf"] = v
+    for (a, b), v in embedding_edges.items():
+        edge_weights[(a, b)]["embedding"] = v
 
     combined: dict[tuple, float] = {}
     signal_breakdown: dict[tuple, dict] = {}
@@ -256,7 +239,7 @@ def run_leiden(work_ids: list[str], edges: dict[tuple, float]):
     return {work_ids[i]: membership[i] for i in range(len(work_ids))}
 
 
-def label_clusters(cluster_of: dict[str, int], work_ids: list[str], matrix, vectorizer) -> dict[int, dict]:
+def label_clusters(cluster_of: dict[str, int], work_ids: list[str], tfidf_matrix, vectorizer) -> dict[int, dict]:
     feature_names = np.array(vectorizer.get_feature_names_out())
     id_to_idx = {wid: i for i, wid in enumerate(work_ids)}
 
@@ -267,7 +250,7 @@ def label_clusters(cluster_of: dict[str, int], work_ids: list[str], matrix, vect
     labels = {}
     for cid, member_ids in members.items():
         idxs = [id_to_idx[m] for m in member_ids]
-        centroid = np.asarray(matrix[idxs].mean(axis=0)).ravel()
+        centroid = np.asarray(tfidf_matrix[idxs].mean(axis=0)).ravel()
         top_idx = np.argsort(-centroid)[:6]
         top_terms = [feature_names[i] for i in top_idx if centroid[i] > 0]
         labels[cid] = {"size": len(member_ids), "top_terms": top_terms}
@@ -366,7 +349,7 @@ def find_collaboration_candidates(author_ids, centroid_matrix, author_to_works, 
     for i in range(n):
         for j in range(i + 1, n):
             score = sims[i, j]
-            if score < AUTHOR_SIM_THRESHOLD or score > AUTHOR_SIM_CEILING:
+            if score < AUTHOR_SIM_THRESHOLD:
                 continue
             a, b = author_ids[i], author_ids[j]
             key = (a, b) if a < b else (b, a)
@@ -390,7 +373,7 @@ def write_results(conn, cluster_of, cluster_labels, kept_edges, signal_breakdown
         CREATE TABLE clusters (cluster_id INTEGER PRIMARY KEY, size INTEGER, top_terms TEXT);
         CREATE TABLE similarity_edges (
             work_id_a TEXT, work_id_b TEXT, weight REAL,
-            has_citation INTEGER, coupling REAL, cocitation REAL, tfidf REAL,
+            has_citation INTEGER, coupling REAL, cocitation REAL, embedding REAL,
             PRIMARY KEY (work_id_a, work_id_b)
         );
         CREATE TABLE collaboration_candidates (
@@ -410,7 +393,7 @@ def write_results(conn, cluster_of, cluster_labels, kept_edges, signal_breakdown
     )
     conn.executemany(
         """INSERT INTO similarity_edges
-           (work_id_a, work_id_b, weight, has_citation, coupling, cocitation, tfidf)
+           (work_id_a, work_id_b, weight, has_citation, coupling, cocitation, embedding)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         [
             (
@@ -418,7 +401,7 @@ def write_results(conn, cluster_of, cluster_labels, kept_edges, signal_breakdown
                 1 if "citation" in signal_breakdown.get((a, b), {}) else 0,
                 signal_breakdown.get((a, b), {}).get("coupling", 0.0),
                 signal_breakdown.get((a, b), {}).get("cocitation", 0.0),
-                signal_breakdown.get((a, b), {}).get("tfidf", 0.0),
+                signal_breakdown.get((a, b), {}).get("embedding", 0.0),
             )
             for (a, b), w in kept_edges.items()
         ],
@@ -446,14 +429,14 @@ def main():
     cocitation = normalize_counter(cocitation_raw)
     print(f"  co-citation pairs (raw): {len(cocitation_raw)}")
 
-    print("Computing TF-IDF title similarity...")
-    work_ids, matrix, tfidf_edges, vectorizer = compute_tfidf_similarity(works, work_types)
-    print(f"  tfidf similarity pairs (top-k, thresholded): {len(tfidf_edges)}")
+    print("Computing semantic embeddings...")
+    work_ids, matrix, embedding_edges, vectorizer, tfidf_matrix = compute_embedding_similarity(works, work_types)
+    print(f"  embedding similarity pairs (top-k, thresholded): {len(embedding_edges)}")
 
     citation_pairs = {(a, b) if a < b else (b, a) for a, b in citations if a != b}
 
     print("Combining signals into weighted graph...")
-    kept_edges, signal_breakdown = build_combined_graph(work_ids, citation_pairs, coupling, cocitation, tfidf_edges)
+    kept_edges, signal_breakdown = build_combined_graph(work_ids, citation_pairs, coupling, cocitation, embedding_edges)
     print(f"  combined graph edges (after top-{TOP_K_NEIGHBORS} pruning): {len(kept_edges)}")
 
     print("Running Leiden clustering...")
@@ -462,7 +445,7 @@ def main():
     print(f"  clusters found: {n_clusters}")
 
     print("Labeling clusters...")
-    cluster_labels = label_clusters(cluster_of, work_ids, matrix, vectorizer)
+    cluster_labels = label_clusters(cluster_of, work_ids, tfidf_matrix, vectorizer)
 
     print("Computing author centroids for collaboration candidates...")
     author_ids, centroid_matrix, author_to_works = compute_author_centroids(authorship, work_ids, matrix)

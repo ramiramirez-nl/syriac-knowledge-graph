@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syriac Studies Curation</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; border: 1px solid #ccc; cursor: pointer; }
+        .tab.active { background: #eee; font-weight: bold; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        .btn { padding: 5px 10px; cursor: pointer; margin-right: 5px; }
+        .btn-danger { background-color: #ffcccc; color: #cc0000; border: 1px solid #cc0000; }
+        .btn-primary { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
+        input[type="text"] { padding: 5px; width: 200px; }
+    </style>
+</head>
+<body>
+    <h1>Curation Admin</h1>
+    <div style="margin-bottom: 15px;">
+        <a href="/">&larr; Back to App</a> | 
+        <a href="/status.html">View Project Status</a>
+    </div>
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('works')">Works</div>
+        <div class="tab" onclick="showTab('authors')">Authors</div>
+        <div class="tab" onclick="showTab('duplicates')">Merge / Duplicates</div>
+        <div class="tab" onclick="showTab('queue')">Moderation Queue</div>
+        <div class="tab" onclick="showTab('import')">Import Data</div>
+    </div>
+
+    <div id="works" class="panel active">
+        <h2>Works</h2>
+        <div>
+            <input type="text" id="searchWork" placeholder="Search works...">
+            <button class="btn btn-primary" onclick="loadWorks()">Search</button>
+            <button class="btn btn-primary" onclick="toggleAddWorkForm()">+ Add Manual Work</button>
+        </div>
+        
+        <div id="addWorkForm" style="display:none; margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background: #fafafa;">
+            <h3>Add New Work</h3>
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">Title:</label>
+                <input type="text" id="newWorkTitle" style="width: 400px;" placeholder="Work Title">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">Year:</label>
+                <input type="text" id="newWorkYear" style="width: 100px;" placeholder="YYYY">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">Work Type:</label>
+                <select id="newWorkType" onchange="toggleManuscriptFields('new')">
+                    <option value="article">Article/Book</option>
+                    <option value="manuscript">Manuscript</option>
+                </select>
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">DOI:</label>
+                <input type="text" id="newWorkDoi" style="width: 200px;" placeholder="10.xxxx/xxxxx">
+            </div>
+            
+            <div id="newManuscriptFields" style="display:none; margin-left: 20px; padding-left: 10px; border-left: 3px solid #007bff; margin-bottom: 10px;">
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Language:</label>
+                    <input type="text" id="newMsLang" placeholder="e.g. Syriac">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Date Composed:</label>
+                    <input type="text" id="newMsDate" placeholder="e.g. 4th century">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Archive:</label>
+                    <input type="text" id="newMsArchive" placeholder="e.g. Vatican Library">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Shelfmark:</label>
+                    <input type="text" id="newMsShelf" placeholder="e.g. Vat. Sir. 1">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Incipit:</label>
+                    <input type="text" id="newMsIncipit" style="width: 300px;" placeholder="First words...">
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">Authors:</label>
+                <input type="text" id="newWorkAuthors" style="width: 400px;" placeholder="Comma separated, e.g. John Doe, Jane Smith">
+            </div>
+            <button class="btn btn-primary" onclick="submitNewWork()">Save Work</button>
+            <button class="btn btn-danger" onclick="toggleAddWorkForm()">Cancel</button>
+            <div id="addWorkResult" style="margin-top: 10px; color: green;"></div>
+        </div>
+
+        <div id="editWorkForm" style="display:none; margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background: #fafafa;">
+            <h3>Edit Work</h3>
+            <input type="hidden" id="editWorkId">
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">Title:</label>
+                <input type="text" id="editWorkTitle" style="width: 400px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">Year:</label>
+                <input type="text" id="editWorkYear" style="width: 100px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">Work Type:</label>
+                <select id="editWorkType" onchange="toggleManuscriptFields('edit')">
+                    <option value="article">Article/Book</option>
+                    <option value="manuscript">Manuscript</option>
+                </select>
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label style="display:inline-block; width: 100px;">DOI:</label>
+                <input type="text" id="editWorkDoi" style="width: 200px;">
+            </div>
+            
+            <div id="editManuscriptFields" style="display:none; margin-left: 20px; padding-left: 10px; border-left: 3px solid #007bff; margin-bottom: 10px;">
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Language:</label>
+                    <input type="text" id="editMsLang" placeholder="e.g. Syriac">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Date Composed:</label>
+                    <input type="text" id="editMsDate" placeholder="e.g. 4th century">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Archive:</label>
+                    <input type="text" id="editMsArchive" placeholder="e.g. Vatican Library">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Shelfmark:</label>
+                    <input type="text" id="editMsShelf" placeholder="e.g. Vat. Sir. 1">
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <label style="display:inline-block; width: 120px;">Incipit:</label>
+                    <input type="text" id="editMsIncipit" style="width: 300px;" placeholder="First words...">
+                </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="submitEditWork()">Update Work</button>
+            <button class="btn btn-danger" onclick="toggleEditWorkForm()">Cancel</button>
+            <div id="editWorkResult" style="margin-top: 10px; color: green;"></div>
+        </div>
+
+        <table>
+            <thead><tr><th>ID</th><th>Title</th><th>Year</th><th>Actions</th></tr></thead>
+            <tbody id="worksBody"></tbody>
+        </table>
+    </div>
+
+    <div id="authors" class="panel">
+        <h2>Authors</h2>
+        <div>
+            <input type="text" id="searchAuthor" placeholder="Search authors...">
+            <button class="btn btn-primary" onclick="loadAuthors()">Search</button>
+        </div>
+        <table>
+            <thead><tr><th>ID</th><th>Name</th><th>Actions</th></tr></thead>
+            <tbody id="authorsBody"></tbody>
+        </table>
+    </div>
+
+    <div id="duplicates" class="panel">
+        <h2>Potential Duplicates</h2>
+        <button class="btn btn-primary" onclick="loadDuplicates()">Find Duplicates</button>
+        <div id="duplicatesResults" style="margin-top: 20px;"></div>
+    </div>
+
+    <div id="queue" class="panel">
+        <h2>Moderation Queue</h2>
+        <button class="btn btn-primary" onclick="loadQueue()">Refresh Queue</button>
+        <div id="queueResults" style="margin-top: 20px;"></div>
+    </div>
+
+    <div id="import" class="panel">
+        <h2>Import Data</h2>
+        <div style="margin-bottom: 20px;">
+            <p>Upload a BibTeX (.bib) file from Zotero, Google Scholar, etc.</p>
+            <input type="file" id="bibtexFile" accept=".bib">
+            <button class="btn btn-primary" onclick="uploadBibtex()">Upload BibTeX</button>
+        </div>
+        <div id="importResults" style="margin-top: 20px;"></div>
+    </div>
+
+    <script src="/js/admin.js"></script>
+</body>
+</html>
