@@ -205,9 +205,6 @@ Contributions welcome. Open issues for:
 
 MIT License — see LICENSE file.
 
-## Contact
-
-Questions? Email: langoraorg@gmail.com
 
 ---
 
