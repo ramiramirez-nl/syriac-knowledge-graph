@@ -127,7 +127,7 @@ def main() -> None:
     graph = nx.Graph()
     graph.add_nodes_from(connected_ids)
     graph.add_weighted_edges_from((e["source"], e["target"], e["weight"]) for e in similarity_edges)
-    positions = nx.spring_layout(graph, k=None, iterations=50, seed=42, scale=500, weight="weight")
+    positions = nx.spring_layout(graph, k=0.08, iterations=200, seed=42, scale=1000, weight="weight")
     for work_id, (x, y) in positions.items():
         works[work_id]["x"] = float(x)
         works[work_id]["y"] = float(y)

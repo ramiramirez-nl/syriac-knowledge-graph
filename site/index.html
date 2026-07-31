@@ -338,7 +338,7 @@
   // Node size from citedByCount (log scale, clamped).
   function sizeOf(citedByCount) {
     const v = Math.log((citedByCount || 0) + 1);
-    return Math.max(2.5, Math.min(14, 2.5 + v * 2.2));
+    return Math.max(2.0, Math.min(11, 2.0 + v * 1.6));
   }
 
   const graph = new Graph();
