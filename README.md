@@ -39,6 +39,22 @@ The primary goal of this project is to provide a bird's-eye view of the field of
 - 🚧 **Curation & Auth**: Admin panel and user authentication prototype active.
 - 🔮 **Community Platform**: Coming next (User-contributed corrections, profiles, discussion threads).
 
+## Corpus Composition
+
+The corpus currently contains **~7,000 works** from multiple publication types:
+
+| Type | Count | Description |
+|---|---|---|
+| Articles | ~2,850 | Journal articles |
+| Book Chapters | ~2,220 | Chapters in edited volumes |
+| Books | ~740 | Monographs and edited volumes |
+| Dissertations | ~145 | PhD and master's theses |
+| Datasets | ~144 | Research datasets |
+| Conference Papers | ~94 | Conference proceedings |
+| Other | ~460+ | Reference entries, software, preprints, etc. |
+
+Data is primarily sourced from **OpenAlex** (open-access academic metadata), supplemented with manually curated imports.
+
 ## Quick Start
 
 ### Prerequisites
