@@ -268,7 +268,29 @@
     // Sort and rank clusters by size on first call
     if (clusterRanks.size === 0 && data.clusters) {
       const sortedClusters = [...data.clusters].sort((a, b) => b.size - a.size);
-      sortedClusters.forEach((c, idx) => clusterRanks.set(c.id, idx));
+      
+      let manuscriptClusterId = null;
+      let peshittaClusterId = null;
+
+      sortedClusters.forEach((c, idx) => {
+        clusterRanks.set(c.id, idx);
+        
+        // Identify the two specific clusters to swap their colors later
+        const terms = (c.topTerms || []).join(", ").toLowerCase();
+        if (terms.includes("manuscripts") && terms.includes("syriac manuscripts")) {
+          manuscriptClusterId = c.id;
+        } else if (terms.includes("peshitta") && terms.includes("version")) {
+          peshittaClusterId = c.id;
+        }
+      });
+
+      // Explicitly swap their ranks so they get each other's colors
+      if (manuscriptClusterId !== null && peshittaClusterId !== null) {
+        const rankM = clusterRanks.get(manuscriptClusterId);
+        const rankP = clusterRanks.get(peshittaClusterId);
+        clusterRanks.set(manuscriptClusterId, rankP);
+        clusterRanks.set(peshittaClusterId, rankM);
+      }
     }
     
     const rank = clusterRanks.get(clusterId);
