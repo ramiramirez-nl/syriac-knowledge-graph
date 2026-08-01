@@ -74,8 +74,7 @@ CREATE TABLE users (
     hashed_password TEXT, role TEXT DEFAULT 'user'
 );
 CREATE TABLE user_claims (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, author_id TEXT,
-    status TEXT DEFAULT 'pending'
+    user_id INTEGER, author_id TEXT, status TEXT DEFAULT 'pending'
 );
 CREATE TABLE pending_contributions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT,
@@ -84,8 +83,11 @@ CREATE TABLE pending_contributions (
 );
 CREATE TABLE notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, message TEXT,
-    is_read INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    is_read INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    kind TEXT DEFAULT 'general', dedupe_key TEXT, link TEXT
 );
+CREATE UNIQUE INDEX idx_notifications_dedupe
+    ON notifications (user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
 """
 
 
@@ -389,6 +391,76 @@ class ContributionWorkflowTests(ApiTestCase):
         mine = self.client.get("/api/notifications", headers=self.auth(self.member))
         self.assertEqual(mine.status_code, 200)
         self.assertEqual(mine.json(), [])
+
+
+class NotificationEndpointTests(ApiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.admin = self.register("admin@example.org")
+        self.member = self.register("member@example.org")
+        conn = sqlite3.connect(self.db_path)
+        # user 1 = admin, user 2 = member
+        conn.executemany(
+            "INSERT INTO notifications (user_id, message, kind, dedupe_key, link, is_read)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (2, "Related work in your area", "neighbour", "neighbour:W3:A1", "#work=W3", 0),
+                (2, "Possible collaboration", "collaboration", "collaboration:A1:A2", "#author=A2", 0),
+                (2, "Already seen", "new_work", "new_work:W1:A1", "#work=W1", 1),
+                (1, "Admin's own notification", "general", "general:1", None, 0),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+    def test_listing_returns_only_own_notifications_with_metadata(self):
+        resp = self.client.get("/api/notifications", headers=self.auth(self.member))
+        self.assertEqual(resp.status_code, 200, resp.text)
+        rows = resp.json()
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(all(r["user_id"] == 2 for r in rows))
+        self.assertEqual(
+            {r["kind"] for r in rows}, {"neighbour", "collaboration", "new_work"}
+        )
+        self.assertIn("#work=", " ".join(r["link"] or "" for r in rows))
+
+    def test_unread_only_filter_and_count(self):
+        unread = self.client.get(
+            "/api/notifications?unread_only=true", headers=self.auth(self.member)
+        ).json()
+        self.assertEqual(len(unread), 2)
+
+        count = self.client.get(
+            "/api/notifications/unread-count", headers=self.auth(self.member)
+        )
+        self.assertEqual(count.json()["unread"], 2)
+
+    def test_cannot_mark_another_users_notification_read(self):
+        # id 4 belongs to the admin; the member must not be able to touch it.
+        resp = self.client.put("/api/notifications/4/read", headers=self.auth(self.member))
+        self.assertEqual(resp.status_code, 404)
+        still_unread = self.client.get(
+            "/api/notifications/unread-count", headers=self.auth(self.admin)
+        ).json()["unread"]
+        self.assertEqual(still_unread, 1)
+
+    def test_mark_all_read_is_scoped_to_the_caller(self):
+        resp = self.client.put("/api/notifications/read-all", headers=self.auth(self.member))
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["updated"], 2)
+        self.assertEqual(
+            self.client.get(
+                "/api/notifications/unread-count", headers=self.auth(self.member)
+            ).json()["unread"],
+            0,
+        )
+        self.assertEqual(
+            self.client.get(
+                "/api/notifications/unread-count", headers=self.auth(self.admin)
+            ).json()["unread"],
+            1,
+            "another user's notifications must be untouched",
+        )
 
 
 if __name__ == "__main__":

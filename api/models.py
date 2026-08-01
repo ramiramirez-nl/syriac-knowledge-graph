@@ -90,4 +90,8 @@ class Notification(BaseModel):
     message: str
     is_read: bool
     created_at: str
+    # Populated by scripts/generate_notifications.py; rows created before that
+    # migration have no kind/link, so both stay optional.
+    kind: Optional[str] = "general"
+    link: Optional[str] = None
 

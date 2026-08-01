@@ -182,16 +182,60 @@
                     return;
                 }
                 
-                let html = '';
+                // Labels for the signals produced by
+                // scripts/generate_notifications.py.
+                const KIND_LABEL = {
+                    new_work: 'Your work',
+                    neighbour: 'Related work',
+                    collaboration: 'Collaboration',
+                    general: 'Update'
+                };
+                const KIND_COLOR = {
+                    new_work: '#2f6fd1',
+                    neighbour: '#0f8a6a',
+                    collaboration: '#b5750f',
+                    general: '#666e7c'
+                };
+
+                const unread = notifs.filter(n => !n.is_read).length;
+                let html = unread > 1
+                    ? `<div style="text-align:right;padding:4px 0;">
+                         <button id="markAllReadBtn" style="font-size:11px;padding:3px 8px;">
+                           Mark all ${unread} as read
+                         </button>
+                       </div>`
+                    : '';
+
                 notifs.forEach(n => {
+                    const kind = n.kind || 'general';
+                    const label = KIND_LABEL[kind] || KIND_LABEL.general;
+                    const color = KIND_COLOR[kind] || KIND_COLOR.general;
+                    // n.link is generated server-side as '#work=ID' / '#author=ID',
+                    // but it is still DB content: only allow that exact shape.
+                    const safeLink = /^#(work|author)=[A-Za-z0-9:_-]+$/.test(n.link || '')
+                        ? n.link
+                        : null;
                     html += `
                         <div style="padding: 10px; border-bottom: 1px solid #ccc; background: ${n.is_read ? 'transparent' : '#fff3cd'};">
+                            <span style="display:inline-block;font-size:10px;text-transform:uppercase;
+                                         letter-spacing:.05em;color:${color};font-weight:600;">
+                              ${escapeHtml(label)}
+                            </span><br>
                             ${escapeHtml(n.message)}
-                            ${!n.is_read ? `<button style="font-size: 10px; padding: 2px 5px; margin-left: 10px;" onclick="markRead(${n.id})">Mark as Read</button>` : ''}
+                            ${safeLink ? `<a href="index.html${safeLink}" style="font-size:11px;margin-left:6px;">View</a>` : ''}
+                            ${!n.is_read ? `<button class="mark-read-btn" data-id="${n.id}" style="font-size: 10px; padding: 2px 5px; margin-left: 10px;">Mark as Read</button>` : ''}
                         </div>
                     `;
                 });
                 list.innerHTML = html;
+
+                // Event delegation instead of inline onclick, matching the XSS
+                // hardening already applied to admin.js.
+                const allBtn = document.getElementById('markAllReadBtn');
+                if (allBtn) allBtn.addEventListener('click', markAllRead);
+                list.querySelectorAll('.mark-read-btn').forEach(btn => {
+                    btn.addEventListener('click', () => markRead(Number(btn.dataset.id)));
+                });
             } catch (err) {
                 console.error(err);
             }
@@ -200,6 +244,18 @@
         async function markRead(id) {
             try {
                 await fetch(`/api/notifications/${id}/read`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                loadNotifications();
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function markAllRead() {
+            try {
+                await fetch('/api/notifications/read-all', {
                     method: 'PUT',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
