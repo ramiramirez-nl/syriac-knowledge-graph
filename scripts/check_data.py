@@ -28,6 +28,16 @@ class Result:
     message: str
 
 
+def table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    """duplicate_candidates only exists once find_duplicates.py has been run."""
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
 def scalar(conn: sqlite3.Connection, sql: str) -> int:
     return int(conn.execute(sql).fetchone()[0])
 
@@ -65,8 +75,27 @@ def check_database(conn: sqlite3.Connection) -> list[Result]:
     invalid_years = scalar(conn, "SELECT COUNT(*) FROM works WHERE year IS NOT NULL AND (year < 1500 OR year > CAST(strftime('%Y','now') AS INTEGER)+1)")
     results.append(Result("OK" if invalid_years == 0 else "WARN", f"implausible publication years: {invalid_years}"))
 
-    duplicate_dois = scalar(conn, "SELECT COUNT(*) FROM (SELECT lower(trim(doi)) FROM works WHERE doi IS NOT NULL AND trim(doi)<>'' GROUP BY lower(trim(doi)) HAVING COUNT(*)>1)")
-    results.append(Result("WARN" if duplicate_dois else "OK", f"duplicate DOI groups: {duplicate_dois}"))
+    # Soft-deleted/excluded works are curation history, not live duplicates: a
+    # resolved merge leaves the loser behind with the same DOI on purpose, so
+    # counting it here would keep warning about work already done.
+    duplicate_dois = scalar(
+        conn,
+        "SELECT COUNT(*) FROM (SELECT lower(trim(doi)) FROM works"
+        " WHERE doi IS NOT NULL AND trim(doi)<>''"
+        " AND status NOT IN ('deleted','excluded')"
+        " GROUP BY lower(trim(doi)) HAVING COUNT(*)>1)",
+    )
+    pending_dupes = scalar(
+        conn,
+        "SELECT COUNT(*) FROM duplicate_candidates WHERE review_status = 'pending'",
+    ) if table_exists(conn, "duplicate_candidates") else 0
+    results.append(
+        Result(
+            "WARN" if duplicate_dois else "OK",
+            f"duplicate DOI groups (live works): {duplicate_dois}"
+            + (f"; {pending_dupes} candidate(s) awaiting curator review" if pending_dupes else ""),
+        )
+    )
 
     bad_cluster_sizes = scalar(conn, "SELECT COUNT(*) FROM clusters c WHERE c.size <> (SELECT COUNT(*) FROM work_clusters w WHERE w.cluster_id=c.cluster_id)")
     results.append(Result("OK" if bad_cluster_sizes == 0 else "ERROR", f"incorrect cluster sizes: {bad_cluster_sizes}"))

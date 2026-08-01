@@ -73,7 +73,8 @@ class IntegrityCheckTests(unittest.TestCase):
         conn = sqlite3.connect(":memory:")
         conn.executescript(
             """
-            CREATE TABLE works (id TEXT PRIMARY KEY, doi TEXT, title TEXT, year INTEGER);
+            CREATE TABLE works (id TEXT PRIMARY KEY, doi TEXT, title TEXT, year INTEGER,
+                                status TEXT DEFAULT 'auto');
             CREATE TABLE authors (id TEXT PRIMARY KEY, name TEXT);
             CREATE TABLE authorship (work_id TEXT, author_id TEXT);
             CREATE TABLE citations (citing_work_id TEXT, cited_work_id TEXT);
@@ -82,7 +83,7 @@ class IntegrityCheckTests(unittest.TestCase):
             CREATE TABLE work_clusters (work_id TEXT, cluster_id INTEGER);
             CREATE TABLE clusters (cluster_id INTEGER, size INTEGER);
             CREATE TABLE collaboration_candidates (author_id_a TEXT, author_id_b TEXT);
-            INSERT INTO works VALUES ('W1', NULL, 'Example', 2020);
+            INSERT INTO works (id, doi, title, year) VALUES ('W1', NULL, 'Example', 2020);
             INSERT INTO authors VALUES ('A1', 'Researcher');
             INSERT INTO authorship VALUES ('W1', 'A1');
             INSERT INTO work_clusters VALUES ('W1', 1);
