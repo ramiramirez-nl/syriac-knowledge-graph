@@ -19,3 +19,6 @@ data/backups/
 
 # Virtual environments
 .venv
+
+# Curator working files (regenerate with triage_duplicates.py --export-review)
+data/review-queue.csv
