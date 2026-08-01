@@ -1,12 +1,20 @@
 name: Deploy to GitHub Pages
 
+# Only deploy after CI has passed on main. Running on `push` directly would
+# publish a broken site whenever tests or the data-integrity check fail.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [main]
+    types: [completed]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
       pages: write

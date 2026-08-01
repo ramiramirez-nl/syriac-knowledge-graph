@@ -137,13 +137,20 @@ def merge_works(request: MergeWorksRequest, db: sqlite3.Connection = Depends(get
         pid = request.primary_id
         sid = request.secondary_id
         
-        # Update citations where sid is citing
-        db.execute("UPDATE OR IGNORE citations SET work_id = ? WHERE work_id = ?", (pid, sid))
-        db.execute("DELETE FROM citations WHERE work_id = ?", (sid,))
-        
+        # Update citations where sid is citing. The column is `citing_work_id`
+        # (an earlier version used a non-existent `work_id` column here, which
+        # made every merge fail with "no such column").
+        db.execute("UPDATE OR IGNORE citations SET citing_work_id = ? WHERE citing_work_id = ?", (pid, sid))
+        db.execute("DELETE FROM citations WHERE citing_work_id = ?", (sid,))
+
         # Update citations where sid is cited
         db.execute("UPDATE OR IGNORE citations SET cited_work_id = ? WHERE cited_work_id = ?", (pid, sid))
         db.execute("DELETE FROM citations WHERE cited_work_id = ?", (sid,))
+
+        # Remapping can turn a pid—sid citation into a self-citation; drop those
+        # so the merge cannot introduce the exact defect check_data.py flags.
+        db.execute("DELETE FROM citations WHERE citing_work_id = cited_work_id")
+        db.execute("DELETE FROM work_references WHERE work_id = referenced_work_id")
         
         # Update authorship
         db.execute("UPDATE OR IGNORE authorship SET work_id = ? WHERE work_id = ?", (pid, sid))

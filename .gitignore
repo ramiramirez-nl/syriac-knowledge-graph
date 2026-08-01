@@ -9,5 +9,13 @@ wheels/
 # Local data-pipeline rollback snapshots
 data/backups/
 
+# Local dev server bookkeeping
+*.pid
+.codex-server.pid
+
+# Local environment / secrets
+.env
+.env.local
+
 # Virtual environments
 .venv
