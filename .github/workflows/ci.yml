@@ -36,3 +36,8 @@ jobs:
         # Non-blocking warnings (e.g. duplicate DOI groups) exit 0; real
         # referential-integrity errors exit non-zero and fail the build.
         run: uv run python scripts/check_data.py
+
+      - name: Deployment preflight (static target)
+        # Catches the failure mode CI would otherwise miss: publishing a
+        # site/data.json that is older than the database it claims to show.
+        run: uv run python scripts/preflight.py --target pages

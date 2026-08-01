@@ -1,36 +1,33 @@
 FROM python:3.12-slim
 
-# Install system dependencies
+# curl is used by the container healthcheck; sqlite3 makes it possible to
+# inspect the mounted database from inside the container.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip install uv
+RUN pip install --no-cache-dir uv
 
-# Set work directory
 WORKDIR /app
 
-# Copy dependency files
+# Copy dependency files first so the (slow) install layer is cached and only
+# rebuilt when the dependency set actually changes.
 COPY pyproject.toml uv.lock ./
-
-# Install python dependencies
 RUN uv sync --frozen --no-dev
 
-# Copy the rest of the application
 COPY . .
 
-# Ensure data directory exists
+# /app/data is a mount point in production (fly.toml volume / compose volume).
 RUN mkdir -p /app/data
 
-# Expose port
+ENV PORT=8080
 EXPOSE 8080
 
-# Environment variables
-ENV PORT=8080
-ENV HOST=0.0.0.0
-# The database will be stored in a volume at /app/data
+# Fail fast if the app stops serving. /healthz is public and does not touch the
+# database, so it stays cheap.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${PORT}/healthz" || exit 1
 
-# Run the application (main.py typically binds to 0.0.0.0:8000, we should run uvicorn directly to bind to PORT)
-CMD ["uv", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Shell form so ${PORT} is expanded: the platform decides the port, not the image.
+CMD uv run uvicorn api.main:app --host 0.0.0.0 --port ${PORT}

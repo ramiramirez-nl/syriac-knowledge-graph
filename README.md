@@ -37,11 +37,11 @@ The primary goal of this project is to provide a bird's-eye view of the field of
 - **Analysis Engine**: Bibliometric analysis, multilingual semantic similarity, and Leiden thematic clustering.
 - **Interactive UI**: WebGL-powered graph visualization with search, detail panels, cluster exploration, and collaboration hints.
 - **Curation & Auth**: FastAPI backend, admin authentication, manual work entry/editing, duplicate review, false-positive exclusion, and BibTeX import.
-- **Community Platform**: Phase 3 is next: notifications, production hosting, and richer member-facing workflows.
+- **Community Platform**: Membership, author-profile claiming, a moderated contribution queue, and notifications for work intersecting your own. Feature-complete; production hosting is prepared but not yet deployed (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
 ## Corpus Composition
 
-The current exported corpus contains **6,554 works** and **2,779 authors** from multiple publication types:
+The current exported corpus contains **6,536 live works** and **2,779 authors** from multiple publication types (18 same-DOI duplicates were merged on 2026-08-01; merged records are soft-deleted, never dropped):
 
 | Type | Count | Description |
 |---|---|---|
@@ -96,11 +96,32 @@ uv run scripts/fetch_openalex.py
 # Remove book reviews (to clean up false clusters)
 uv run scripts/remove_reviews.py
 
+# Merge unambiguous same-DOI duplicates, queue the rest for a curator
+uv run scripts/resolve_duplicates.py --dry-run
+uv run scripts/resolve_duplicates.py
+
 # Compute similarity graph & Leiden clusters
 uv run scripts/compute_analysis.py
 
 # Export to JSON for visualization
 uv run scripts/export_json.py
+
+# Notify members whose claimed profiles are affected (idempotent, cron-safe)
+uv run scripts/generate_notifications.py
+```
+
+Or run the whole chain with automatic backup and rollback:
+
+```bash
+uv run scripts/update_data.py
+```
+
+### Verifying
+
+```bash
+uv run python -m unittest discover -s tests   # 63 tests
+uv run scripts/check_data.py                  # corpus integrity
+uv run scripts/preflight.py --target pages    # deployment readiness
 ```
 
 ## Usage
@@ -148,7 +169,7 @@ Weighted combination for discovery:
 
 1. **Title-only semantics**: Multilingual embeddings are stronger than the earlier TF-IDF signal, but title-only similarity still needs curator judgment for short or generic titles.
 2. **Book review artifacts**: OpenAlex indexes book reviews as separate works with near-identical titles. We actively filter these out (`scripts/remove_reviews.py`).
-3. **OpenAlex duplicates**: The same paper can be indexed twice. Duplicate detection logic helps highlight these in the curation admin; the current integrity check reports 23 duplicate DOI groups for review.
+3. **OpenAlex duplicates**: The same paper can be indexed twice. `scripts/resolve_duplicates.py` merges only unambiguous cases — a shared DOI is *not* proof, since publishers reuse DOIs across editions and reprints. 18 groups were merged automatically; **5 same-DOI pairs and ~920 lower-confidence candidates remain queued for human review** in the admin UI.
 
 ## Roadmap
 
@@ -157,10 +178,15 @@ Weighted combination for discovery:
 - Manual false-positive filtering
 - BibTeX import and admin-authenticated curation workflows
 
-### Phase 3: Community Platform
+### Phase 3: Community Platform (Feature-complete)
+- Membership, author-profile claiming, moderated contribution queue
 - Notifications for new related publications or researchers
-- Production hosting for the full authenticated app
-- Richer member profiles and contribution workflows
+- Production hosting **prepared, not deployed** — see [DEPLOYMENT.md](DEPLOYMENT.md)
+
+### Next
+- Choose between free static hosting (GitHub Pages) and the full authenticated backend (Fly.io)
+- Work through the duplicate review queue
+- Feed abstracts into the embeddings; titles alone remain the main quality ceiling
 
 ## Contributing
 
