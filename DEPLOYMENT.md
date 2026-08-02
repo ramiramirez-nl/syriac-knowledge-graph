@@ -45,6 +45,39 @@ Enable once in the repo: **Settings → Pages → Source: GitHub Actions**.
 call returns 404 — there is no backend. Either accept that or remove the header
 links before publishing.
 
+### Curation happens locally on this option
+
+Static hosting has no API, so the admin UI only works against a local server.
+That is not a limitation in practice: curate locally, re-export, push, and the
+published site picks up the result.
+
+```bash
+# 1. Start the app locally
+uv run main.py --port 8131
+
+# 2. First run only — create the admin account.
+#    The FIRST account registered is promoted to admin automatically.
+#    Open http://localhost:8131/login.html and register.
+
+# 3. Work the queue: http://localhost:8131/admin.html -> "Review Queue" tab
+
+# 4. Publish the decisions
+uv run scripts/compute_analysis.py   # only if you merged anything
+uv run scripts/export_json.py
+uv run scripts/check_data.py
+git add -A && git commit -m "curation: review queue decisions" && git push
+```
+
+Step 4 matters: merges change the graph, and `preflight.py` fails the deploy if
+`site/data.json` is older than the database — precisely so a stale graph cannot
+be published.
+
+Prefer a spreadsheet for a bulk pass? Export the remainder grouped by reason:
+
+```bash
+uv run scripts/triage_duplicates.py --export-review data/review-queue.csv
+```
+
 ## Option B — Fly.io (full app)
 
 `fly.toml` and `Dockerfile` are ready. The database lives on a mounted volume
