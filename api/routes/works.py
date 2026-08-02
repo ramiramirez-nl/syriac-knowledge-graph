@@ -177,7 +177,25 @@ def merge_works(request: MergeWorksRequest, db: sqlite3.Connection = Depends(get
 
         # Soft delete the secondary work
         db.execute("UPDATE works SET status = 'deleted' WHERE id = ?", (sid,))
-        
+
+        # Close the review queue entry for this pair (in either column order),
+        # otherwise a pair merged from the admin UI stays 'pending' forever and
+        # the curator is shown a decision they already made.
+        db.execute(
+            "UPDATE duplicate_candidates SET review_status = 'merged', curator_note = ?"
+            " WHERE review_status = 'pending'"
+            "   AND ((work_id_a = ? AND work_id_b = ?) OR (work_id_a = ? AND work_id_b = ?))",
+            (f"merged via admin UI: kept {pid}", pid, sid, sid, pid),
+        )
+
+        # Any other pending pair that referenced the now-deleted work is stale.
+        db.execute(
+            "UPDATE duplicate_candidates SET review_status = 'resolved',"
+            " curator_note = COALESCE(curator_note, 'one side merged away')"
+            " WHERE review_status = 'pending' AND (work_id_a = ? OR work_id_b = ?)",
+            (sid, sid),
+        )
+
         db.commit()
         return {"message": "Works merged successfully"}
     except Exception as e:

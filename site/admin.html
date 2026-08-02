@@ -17,6 +17,28 @@
         .btn-danger { background-color: #ffcccc; color: #cc0000; border: 1px solid #cc0000; }
         .btn-primary { background-color: #cce5ff; color: #004085; border: 1px solid #b8daff; }
         input[type="text"] { padding: 5px; width: 200px; }
+        .queue-count { font-size: 14px; font-weight: normal; color: #666; }
+        .queue-help { max-width: 70ch; color: #444; line-height: 1.5; font-size: 14px; }
+        .pair { border: 1px solid #ddd; border-radius: 6px; margin-bottom: 18px; overflow: hidden; }
+        .pair-head {
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 12px; padding: 8px 12px; background: #f6f7f9;
+            border-bottom: 1px solid #ddd; font-size: 13px; color: #555;
+        }
+        .pair-body { display: flex; flex-wrap: wrap; }
+        .pair-side { flex: 1 1 300px; padding: 12px; min-width: 0; }
+        .pair-side + .pair-side { border-left: 1px solid #eee; }
+        .pair-side h4 { margin: 0 0 6px; font-size: 15px; line-height: 1.35; }
+        .pair-side dl { margin: 0; font-size: 13px; color: #555; }
+        .pair-side dt { float: left; clear: left; width: 68px; color: #999; }
+        .pair-side dd { margin: 0 0 3px 74px; word-break: break-word; }
+        .pair-actions {
+            display: flex; flex-wrap: wrap; gap: 8px;
+            padding: 10px 12px; border-top: 1px solid #eee; background: #fcfcfd;
+        }
+        .diff { background: #fff3cd; }
+        .score { font-variant-numeric: tabular-nums; }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
 </head>
 <body>
@@ -28,6 +50,7 @@
     <div class="tabs">
         <div class="tab active" onclick="showTab('works', event)">Works</div>
         <div class="tab" onclick="showTab('authors', event)">Authors</div>
+        <div class="tab" onclick="showTab('reviewqueue', event)">Review Queue</div>
         <div class="tab" onclick="showTab('duplicates', event)">Merge / Duplicates</div>
         <div class="tab" onclick="showTab('queue', event)">Moderation Queue</div>
         <div class="tab" onclick="showTab('import', event)">Import Data</div>
@@ -164,8 +187,29 @@
         </table>
     </div>
 
+    <div id="reviewqueue" class="panel">
+        <h2>Review Queue <span id="queueCount" class="queue-count"></span></h2>
+        <p class="queue-help">
+            Pairs the automatic triage could not decide. Everything mechanical
+            (series instalments, per-volume ISBNs, chapter sequences, versioned
+            datasets) has already been handled. These need a human judgement:
+            <strong>Same work</strong> merges and keeps the record you pick,
+            <strong>Different</strong> removes the pair from the queue for good.
+            Nothing is ever hard-deleted.
+        </p>
+        <button class="btn btn-primary" onclick="loadReviewQueue(0)">Load Queue</button>
+        <div id="reviewQueueResults" style="margin-top: 20px;"></div>
+        <div id="reviewQueuePager" style="margin-top: 16px;"></div>
+    </div>
+
     <div id="duplicates" class="panel">
         <h2>Potential Duplicates</h2>
+        <p class="queue-help">
+            Recomputes candidates from scratch by fuzzy title match, to surface
+            pairs the pipeline never recorded. Decisions here are not tracked as
+            a backlog &mdash; to work through the recorded queue use
+            <strong>Review Queue</strong>.
+        </p>
         <button class="btn btn-primary" onclick="loadDuplicates()">Find Duplicates</button>
         <div id="duplicatesResults" style="margin-top: 20px;"></div>
     </div>

@@ -127,6 +127,23 @@ def build_test_db(path: Path) -> None:
         [("W1", 1), ("W2", 1), ("W3", 1)],
     )
     conn.execute("INSERT INTO clusters (cluster_id, size, top_terms) VALUES (1, 3, 'syriac')")
+
+    # The recorded duplicate backlog that /api/curation/queue works through.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS duplicate_candidates (
+            work_id_a TEXT, work_id_b TEXT, score REAL, title_similarity REAL,
+            same_doi INTEGER DEFAULT 0, year_difference INTEGER,
+            venue_similarity REAL DEFAULT 0, reasons TEXT,
+            review_status TEXT DEFAULT 'pending', curator_note TEXT, detected_at TEXT,
+            PRIMARY KEY (work_id_a, work_id_b)
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO duplicate_candidates (work_id_a, work_id_b, score, title_similarity,"
+        " reasons, review_status) VALUES ('W1', 'W2', 0.95, 0.99, 'title=0.99', 'pending')"
+    )
     conn.commit()
     conn.close()
 
@@ -465,3 +482,98 @@ class NotificationEndpointTests(ApiTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewQueueTests(ApiTestCase):
+    """The recorded duplicate backlog: /api/curation/queue and /reject.
+
+    Distinct from /api/curation/duplicates, which recomputes pairs on each call
+    and therefore cannot be worked down to zero.
+    """
+
+    def test_queue_requires_admin(self):
+        self.assertEqual(self.client.get("/api/curation/queue").status_code, 401)
+        admin = self.register("admin@test")
+        non_admin = self.register("other@test")
+        self.assertEqual(
+            self.client.get("/api/curation/queue", headers=self.auth(admin)).status_code, 200
+        )
+        self.assertEqual(
+            self.client.get("/api/curation/queue", headers=self.auth(non_admin)).status_code, 403
+        )
+
+    def test_queue_returns_both_sides_with_authors(self):
+        token = self.register("admin@test")
+        data = self.client.get("/api/curation/queue", headers=self.auth(token)).json()
+        self.assertEqual(data["total"], 1)
+        pair = data["pairs"][0]
+        self.assertEqual(pair["work_id_a"], "W1")
+        self.assertEqual(pair["work_id_b"], "W2")
+        self.assertIn("authors_a", pair)
+        self.assertIn("authors_b", pair)
+        self.assertIn("doi_a", pair)
+
+    def test_reject_removes_the_pair_from_the_queue(self):
+        token = self.register("admin@test")
+        resp = self.client.post(
+            "/api/curation/reject",
+            json={"work_id_a": "W1", "work_id_b": "W2", "note": "different editions"},
+            headers=self.auth(token),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["remaining"], 0)
+        after = self.client.get("/api/curation/queue", headers=self.auth(token)).json()
+        self.assertEqual(after["total"], 0)
+
+    def test_rejecting_twice_is_a_404(self):
+        token = self.register("admin@test")
+        body = {"work_id_a": "W1", "work_id_b": "W2"}
+        self.client.post("/api/curation/reject", json=body, headers=self.auth(token))
+        second = self.client.post("/api/curation/reject", json=body, headers=self.auth(token))
+        self.assertEqual(second.status_code, 404)
+
+    def test_reject_does_not_touch_the_works(self):
+        token = self.register("admin@test")
+        self.client.post(
+            "/api/curation/reject",
+            json={"work_id_a": "W1", "work_id_b": "W2"},
+            headers=self.auth(token),
+        )
+        conn = sqlite3.connect(self.db_path)
+        statuses = dict(conn.execute("SELECT id, status FROM works WHERE id IN ('W1','W2')"))
+        conn.close()
+        self.assertNotIn("deleted", statuses.values())
+
+    def test_merge_closes_the_queue_entry(self):
+        token = self.register("admin@test")
+        resp = self.client.post(
+            "/api/works/merge",
+            json={"primary_id": "W1", "secondary_id": "W2"},
+            headers=self.auth(token),
+        )
+        self.assertEqual(resp.status_code, 200)
+        # The pair must not come back as pending after being merged.
+        after = self.client.get("/api/curation/queue", headers=self.auth(token)).json()
+        self.assertEqual(after["total"], 0)
+        conn = sqlite3.connect(self.db_path)
+        status = conn.execute(
+            "SELECT review_status FROM duplicate_candidates WHERE work_id_a='W1'"
+        ).fetchone()[0]
+        conn.close()
+        self.assertEqual(status, "merged")
+
+    def test_queue_hides_pairs_whose_side_was_deleted(self):
+        token = self.register("admin@test")
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("UPDATE works SET status = 'deleted' WHERE id = 'W2'")
+        conn.commit()
+        conn.close()
+        data = self.client.get("/api/curation/queue", headers=self.auth(token)).json()
+        self.assertEqual(data["total"], 0)
+
+    def test_queue_page_size_is_capped(self):
+        token = self.register("admin@test")
+        data = self.client.get(
+            "/api/curation/queue?limit=9999", headers=self.auth(token)
+        ).json()
+        self.assertLessEqual(data["limit"], 200)

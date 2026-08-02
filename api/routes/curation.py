@@ -1,13 +1,125 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 import sqlite3
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from thefuzz import fuzz
 
 from api.database import get_db
 from api.auth import get_current_admin
 
 router = APIRouter()
+
+MAX_QUEUE_PAGE = 200
+
+
+class RejectPairRequest(BaseModel):
+    work_id_a: str
+    work_id_b: str
+    note: Optional[str] = None
+
+
+@router.get("/queue")
+def get_review_queue(
+    limit: int = 50,
+    offset: int = 0,
+    db: sqlite3.Connection = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
+):
+    """The real duplicate queue: rows triage_duplicates.py could not decide.
+
+    Distinct from /duplicates, which recomputes candidates from scratch with a
+    fuzzy title match. That is useful for spotting pairs the pipeline never
+    recorded, but it cannot be worked through to completion because it does not
+    persist decisions. This endpoint reads duplicate_candidates, so rejecting or
+    merging a pair actually removes it from the backlog.
+    """
+    limit = max(1, min(limit, MAX_QUEUE_PAGE))
+    offset = max(0, offset)
+
+    total = db.execute(
+        """
+        SELECT COUNT(*) FROM duplicate_candidates d
+        JOIN works a ON a.id = d.work_id_a
+        JOIN works b ON b.id = d.work_id_b
+        WHERE d.review_status = 'pending'
+          AND a.status NOT IN ('deleted', 'excluded')
+          AND b.status NOT IN ('deleted', 'excluded')
+        """
+    ).fetchone()[0]
+
+    rows = db.execute(
+        """
+        SELECT d.work_id_a, d.work_id_b, d.score, d.same_doi, d.reasons,
+               a.title AS title_a, a.year AS year_a, a.venue AS venue_a,
+               a.doi AS doi_a, a.cited_by_count AS cited_a, a.work_type AS type_a,
+               b.title AS title_b, b.year AS year_b, b.venue AS venue_b,
+               b.doi AS doi_b, b.cited_by_count AS cited_b, b.work_type AS type_b
+        FROM duplicate_candidates d
+        JOIN works a ON a.id = d.work_id_a
+        JOIN works b ON b.id = d.work_id_b
+        WHERE d.review_status = 'pending'
+          AND a.status NOT IN ('deleted', 'excluded')
+          AND b.status NOT IN ('deleted', 'excluded')
+        ORDER BY d.score DESC, d.work_id_a
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
+    ).fetchall()
+
+    pairs = []
+    for r in rows:
+        row = dict(r)
+        for side in ("a", "b"):
+            row[f"authors_{side}"] = [
+                x[0]
+                for x in db.execute(
+                    "SELECT au.name FROM authorship s"
+                    " JOIN authors au ON au.id = s.author_id"
+                    " WHERE s.work_id = ?",
+                    (row[f"work_id_{side}"],),
+                )
+            ]
+        pairs.append(row)
+
+    return {"total": total, "limit": limit, "offset": offset, "pairs": pairs}
+
+
+@router.post("/reject")
+def reject_pair(
+    request: RejectPairRequest,
+    db: sqlite3.Connection = Depends(get_db),
+    admin: dict = Depends(get_current_admin),
+):
+    """Mark a pair as 'not a duplicate' so it leaves the queue permanently.
+
+    Without this, a curator can only ever merge, and every correctly-distinct
+    pair stays in the backlog forever.
+    """
+    cur = db.execute(
+        "UPDATE duplicate_candidates SET review_status = 'rejected', curator_note = ?"
+        " WHERE work_id_a = ? AND work_id_b = ? AND review_status = 'pending'",
+        (request.note or f"rejected by {admin.get('email', 'admin')}",
+         request.work_id_a, request.work_id_b),
+    )
+    if cur.rowcount == 0:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="No pending candidate for that pair")
+    db.commit()
+    return {"message": "Pair marked as distinct", "remaining": _pending_count(db)}
+
+
+def _pending_count(db: sqlite3.Connection) -> int:
+    return db.execute(
+        """
+        SELECT COUNT(*) FROM duplicate_candidates d
+        JOIN works a ON a.id = d.work_id_a
+        JOIN works b ON b.id = d.work_id_b
+        WHERE d.review_status = 'pending'
+          AND a.status NOT IN ('deleted', 'excluded')
+          AND b.status NOT IN ('deleted', 'excluded')
+        """
+    ).fetchone()[0]
 
 def get_block_key(title: str) -> str:
     if not title:

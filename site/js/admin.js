@@ -485,3 +485,158 @@ async function processContribution(id, action) {
 document.addEventListener('DOMContentLoaded', () => {
     if (requireAdmin()) loadWorks();
 });
+
+// ---------------------------------------------------------------------------
+// Review queue: the recorded duplicate_candidates backlog.
+//
+// Kept separate from loadDuplicates() because that one recomputes pairs on
+// every call and cannot be worked down to zero. Here each decision persists,
+// so the count actually falls.
+// ---------------------------------------------------------------------------
+
+const QUEUE_PAGE_SIZE = 25;
+let queueOffset = 0;
+
+async function loadReviewQueue(offset) {
+    queueOffset = Math.max(0, offset || 0);
+    const box = document.getElementById('reviewQueueResults');
+    box.textContent = 'Loading...';
+
+    const res = await fetch(
+        `${API_BASE}/curation/queue?limit=${QUEUE_PAGE_SIZE}&offset=${queueOffset}`,
+        { headers: authHeaders() }
+    );
+    if (!res.ok) {
+        box.textContent = 'Error loading queue.';
+        return;
+    }
+
+    const data = await res.json();
+    document.getElementById('queueCount').textContent =
+        data.total ? `${data.total} pair(s) awaiting review` : 'empty';
+
+    if (!data.pairs.length) {
+        box.innerHTML = '<p>Nothing left to review. The queue is clear.</p>';
+        document.getElementById('reviewQueuePager').innerHTML = '';
+        return;
+    }
+
+    box.innerHTML = data.pairs.map(renderPair).join('');
+    wireQueueButtons();
+    renderQueuePager(data);
+}
+
+// Highlight where the two titles diverge, so the curator can see at a glance
+// whether the difference is meaningful or just punctuation/case.
+function markTitleDiff(titleA, titleB) {
+    const a = titleA || '', b = titleB || '';
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (norm(a) === norm(b)) {
+        return [escapeHtml(a), escapeHtml(b)];
+    }
+    const wordsB = new Set(norm(b).match(/[a-z0-9]+/g) || []);
+    const wordsA = new Set(norm(a).match(/[a-z0-9]+/g) || []);
+    const mark = (text, otherWords) => text.split(/(\s+)/).map(tok => {
+        const key = tok.toLowerCase().replace(/[^a-z0-9]+/g, '');
+        if (!key) return escapeHtml(tok);
+        return otherWords.has(key)
+            ? escapeHtml(tok)
+            : `<span class="diff">${escapeHtml(tok)}</span>`;
+    }).join('');
+    return [mark(a, wordsB), mark(b, wordsA)];
+}
+
+function renderSide(pair, side, titleHtml) {
+    const id = pair[`work_id_${side}`];
+    const authors = pair[`authors_${side}`] || [];
+    const doi = pair[`doi_${side}`];
+    return `
+        <div class="pair-side">
+            <h4>${titleHtml}</h4>
+            <dl>
+                <dt>ID</dt><dd>${escapeHtml(id)}</dd>
+                <dt>Year</dt><dd>${escapeHtml(String(pair[`year_${side}`] ?? '—'))}</dd>
+                <dt>Type</dt><dd>${escapeHtml(pair[`type_${side}`] || '—')}</dd>
+                <dt>Venue</dt><dd>${escapeHtml(pair[`venue_${side}`] || '—')}</dd>
+                <dt>Authors</dt><dd>${authors.length ? escapeHtml(authors.join(', ')) : '<em>none recorded</em>'}</dd>
+                <dt>Cited</dt><dd>${escapeHtml(String(pair[`cited_${side}`] ?? 0))}</dd>
+                <dt>DOI</dt><dd>${doi ? `<a href="${escapeHtml(doi)}" target="_blank" rel="noopener noreferrer">${escapeHtml(doi)}</a>` : '—'}</dd>
+            </dl>
+        </div>`;
+}
+
+function renderPair(pair) {
+    const [titleA, titleB] = markTitleDiff(pair.title_a, pair.title_b);
+    const a = pair.work_id_a, b = pair.work_id_b;
+    const key = `${a}|${b}`;
+    return `
+        <div class="pair" data-pair="${escapeHtml(key)}">
+            <div class="pair-head">
+                <span class="score">similarity ${(pair.score * 100).toFixed(1)}%${pair.same_doi ? ' · same DOI' : ''}</span>
+                <span>${escapeHtml(pair.reasons || '')}</span>
+            </div>
+            <div class="pair-body">
+                ${renderSide(pair, 'a', titleA)}
+                ${renderSide(pair, 'b', titleB)}
+            </div>
+            <div class="pair-actions">
+                <button class="btn btn-primary" data-queue-merge="${escapeHtml(a)}|${escapeHtml(b)}">Same work — keep left</button>
+                <button class="btn btn-primary" data-queue-merge="${escapeHtml(b)}|${escapeHtml(a)}">Same work — keep right</button>
+                <button class="btn" data-queue-reject="${escapeHtml(key)}">Different — not a duplicate</button>
+            </div>
+        </div>`;
+}
+
+function wireQueueButtons() {
+    document.querySelectorAll('[data-queue-merge]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const [keep, drop] = btn.dataset.queueMerge.split('|');
+            queueMerge(keep, drop);
+        });
+    });
+    document.querySelectorAll('[data-queue-reject]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const [a, b] = btn.dataset.queueReject.split('|');
+            queueReject(a, b);
+        });
+    });
+}
+
+async function queueMerge(keepId, dropId) {
+    if (!confirm(`Merge ${dropId} into ${keepId}?\n\n${dropId} will be hidden (soft-deleted) and its citations, authorship and links moved to ${keepId}.`)) return;
+    const res = await fetch(`${API_BASE}/works/merge`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ primary_id: keepId, secondary_id: dropId })
+    });
+    if (res.ok) {
+        loadReviewQueue(queueOffset);
+    } else {
+        alert('Error merging works');
+    }
+}
+
+async function queueReject(a, b) {
+    const res = await fetch(`${API_BASE}/curation/reject`, {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ work_id_a: a, work_id_b: b })
+    });
+    if (res.ok) {
+        loadReviewQueue(queueOffset);
+    } else {
+        alert('Error rejecting pair');
+    }
+}
+
+function renderQueuePager(data) {
+    const shownTo = Math.min(data.offset + data.pairs.length, data.total);
+    const parts = [`<span>Showing ${data.offset + 1}–${shownTo} of ${data.total}</span> `];
+    if (data.offset > 0) {
+        parts.push(`<button class="btn" onclick="loadReviewQueue(${Math.max(0, data.offset - QUEUE_PAGE_SIZE)})">&larr; Previous</button>`);
+    }
+    if (shownTo < data.total) {
+        parts.push(`<button class="btn" onclick="loadReviewQueue(${data.offset + QUEUE_PAGE_SIZE})">Next &rarr;</button>`);
+    }
+    document.getElementById('reviewQueuePager').innerHTML = parts.join(' ');
+}
